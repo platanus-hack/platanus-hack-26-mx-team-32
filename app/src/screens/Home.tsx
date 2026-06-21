@@ -8,8 +8,9 @@ import { ChatDrawer } from '../components/ChatDrawer'
 import { getMyVinculo } from '../features/profile/api'
 import { fullName, type VinculoOut } from '../features/profile/types'
 import { fetchPersonsOnMap, type PersonOnMap } from '../features/landing/api'
-import { matchPreview } from '../features/matching/api'
+import { matchPreview, notifyMatch } from '../features/matching/api'
 import type { PreviewCandidate } from '../features/matching/types'
+import { useNotifications } from '../features/notifications'
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
@@ -427,9 +428,12 @@ function UploadEvidenceModal({ onClose, onMatch }: { onClose: () => void; onMatc
         senas: desc.trim() ? [desc.trim()] : undefined,
       })
       setResults(res.candidatos)
-      // Strong match → push a live notification card to Inicio.
+      // Strong match → local card on my screen + notify the families linked to that persona.
       const top = res.candidatos[0]
-      if (top && top.score >= NOTIFY_THRESHOLD) onMatch(top)
+      if (top && top.score >= NOTIFY_THRESHOLD) {
+        onMatch(top)
+        notifyMatch(top.persona_victima_id, top.nombre, top.score, top.tier).catch(() => {})
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo procesar la evidencia')
     } finally {
@@ -613,7 +617,7 @@ const NOTIFICATIONS = [
   },
 ]
 
-type Notif = { id: number; title: string; desc: string; time: string; isNew?: boolean }
+type Notif = { id: number | string; title: string; desc: string; time: string; isNew?: boolean }
 
 // Score at/above which a candidate is worth notifying the user about.
 const NOTIFY_THRESHOLD = 0.7
@@ -645,6 +649,23 @@ export function Home() {
       ...prev,
     ])
   }
+
+  // Realtime: cross-user match notifications (e.g. someone reports a finding for
+  // the person YOU are linked to). RLS scopes rows to this user; live via Supabase.
+  const { items: liveNotifs } = useNotifications(!!vinculo)
+  const liveMatchNotifs: Notif[] = liveNotifs
+    .filter(n => n.tipo === 'match')
+    .map(n => {
+      const p = (n.payload ?? {}) as { tier?: string; nombre?: string | null; score?: number }
+      return {
+        id: n.id,
+        title: 'Nueva coincidencia detectada',
+        desc: `Coincidencia ${p.tier ?? ''} con ${p.nombre ?? 'un registro'} — ${Math.round((p.score ?? 0) * 100)}% de similitud.`,
+        time: 'ahora',
+        isNew: true,
+      }
+    })
+  const allNotifs: Notif[] = [...liveMatchNotifs, ...notifs]
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -823,7 +844,7 @@ export function Home() {
               Buscar coincidencias
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {notifs.map(n => (
+              {allNotifs.map(n => (
                 <div
                   key={n.id}
                   className={n.isNew ? 'glass anim-fade-in' : 'glass'}

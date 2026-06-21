@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...db import get_db
+from ..auth.dependencies import get_current_user
 from . import service
-from .schemas import CuerpoQuery, PersonaCandidatos, PreviewResult
+from .schemas import CuerpoQuery, NotifyMatchIn, PersonaCandidatos, PreviewResult
 
 router = APIRouter(tags=["matching"])
 
@@ -23,3 +24,13 @@ def match_preview(query: CuerpoQuery, db=Depends(get_db)):
     Read-only: nothing is persisted."""
     retrieved, via, candidatos = service.preview_match(db, query.model_dump())
     return PreviewResult(retrieved=retrieved, via=via, candidatos=candidatos)
+
+
+@router.post("/match/notify", status_code=201)
+def notify_match(body: NotifyMatchIn, user=Depends(get_current_user), db=Depends(get_db)):
+    """A reporter's finding strongly matched a persona → notify the families
+    linked to that persona (realtime in-app alert). Excludes the reporter."""
+    n = service.notify_linked_of_match(
+        db, body.persona_victima_id, body.nombre, body.score, body.tier, user.id
+    )
+    return {"notified": n}
