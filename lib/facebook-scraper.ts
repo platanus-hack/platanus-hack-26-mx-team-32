@@ -294,42 +294,69 @@ interface GeocodeResult {
   region: string;
 }
 
+// CDMX bounding box used to bias geocoding toward Mexico City for bare street addresses
+const CDMX_BOUNDS = "19.0494,-99.3648|19.5933,-98.9486";
+
+function buildGeocodeAddress(locationText: string): string {
+  const lower = locationText.toLowerCase();
+  // If the text already mentions a city, state, or country — use as-is
+  const hasCityHint = /ciudad de m[eé]xico|cdmx|guadalajara|monterrey|puebla|estado de m[eé]xico|m[eé]xico|mexico/i.test(locationText);
+  if (hasCityHint) return locationText;
+  // Bare street addresses ("Rio Elba 21 y 22") get CDMX appended
+  const looksLikeStreet = /\d/.test(lower) || /\bcalle\b|\bav(enida)?\b|\bblvd\b|\bcolonia\b|\bcol\.\b/i.test(lower);
+  if (looksLikeStreet) return `${locationText}, Ciudad de México, México`;
+  // Anything else: append México so it resolves within the country
+  return `${locationText}, México`;
+}
+
 async function geocodeLocation(locationText: string): Promise<GeocodeResult | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
 
+  const address = buildGeocodeAddress(locationText);
+
   const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-  url.searchParams.set("address", locationText);
+  url.searchParams.set("address", address);
   url.searchParams.set("key", apiKey);
   url.searchParams.set("language", "es");
   url.searchParams.set("region", "mx");
+  url.searchParams.set("components", "country:MX");
+  // Bias results toward CDMX for street-level queries
+  url.searchParams.set("bounds", CDMX_BOUNDS);
 
-  try {
-    const res = await fetch(url.toString());
-    if (!res.ok) return null;
+  type GeocodeResponse = {
+    status: string;
+    results: Array<{
+      geometry: { location: { lat: number; lng: number } };
+      address_components: Array<{ long_name: string; types: string[] }>;
+    }>;
+  };
 
-    const data = await res.json() as {
-      status: string;
-      results: Array<{
-        geometry: { location: { lat: number; lng: number } };
-        address_components: Array<{ long_name: string; types: string[] }>;
-      }>;
-    };
-
-    if (data.status !== "OK" || data.results.length === 0) return null;
-
-    const first = data.results[0];
-    const { lat, lng } = first.geometry.location;
-
-    const regionComponent = first.address_components.find((c) =>
-      c.types.includes("administrative_area_level_1"),
-    );
-    const region = regionComponent?.long_name ?? "";
-
-    return { lat, lng, region };
-  } catch {
-    return null;
+  async function tryFetch(queryUrl: URL): Promise<GeocodeResult | null> {
+    try {
+      const res = await fetch(queryUrl.toString());
+      if (!res.ok) return null;
+      const data = await res.json() as GeocodeResponse;
+      if (data.status !== "OK" || data.results.length === 0) return null;
+      const first = data.results[0];
+      const { lat, lng } = first.geometry.location;
+      const regionComponent = first.address_components.find((c) =>
+        c.types.includes("administrative_area_level_1"),
+      );
+      return { lat, lng, region: regionComponent?.long_name ?? "" };
+    } catch {
+      return null;
+    }
   }
+
+  // First attempt: enriched address with CDMX bounds bias
+  const result = await tryFetch(url);
+  if (result) return result;
+
+  // Fallback: drop bounds bias but keep country restriction (wider search)
+  const fallbackUrl = new URL(url.toString());
+  fallbackUrl.searchParams.delete("bounds");
+  return tryFetch(fallbackUrl);
 }
 
 async function parallelBatch<T, R>(
