@@ -419,22 +419,35 @@ function UploadEvidenceModal({ onClose, onMatch }: { onClose: () => void; onMatc
     setError(null)
     setResults(null)
     try {
-      const res = await matchPreview({
+      const query = {
         sexo: sexo || undefined,
         estado: estado || undefined,
         edad_min: edadMin ? Number(edadMin) : undefined,
         edad_max: edadMax ? Number(edadMax) : undefined,
         estatura_cm: estatura ? Number(estatura) : undefined,
         senas: desc.trim() ? [desc.trim()] : undefined,
-      })
+      }
+      console.debug('[match] → /match/preview query:', query)
+      const res = await matchPreview(query)
+      console.debug(`[match] ← ${res.candidatos.length} candidate(s), via ${res.via}; top:`,
+        res.candidatos[0] ? `${res.candidatos[0].nombre} ${(res.candidatos[0].score * 100).toFixed(0)}%` : '(none)')
       setResults(res.candidatos)
       // Strong match → local card on my screen + notify the families linked to that persona.
       const top = res.candidatos[0]
       if (top && top.score >= NOTIFY_THRESHOLD) {
         onMatch(top)
-        notifyMatch(top.persona_victima_id, top.nombre, top.score, top.tier).catch(() => {})
+        console.debug(`[notify] top score ${(top.score * 100).toFixed(0)}% ≥ ${NOTIFY_THRESHOLD * 100}% → notifying families of ${top.persona_victima_id}`)
+        try {
+          const r = await notifyMatch(top.persona_victima_id, top.nombre, top.score, top.tier)
+          console.debug(`[notify] ✓ backend notified ${r.notified} linked family(ies)`)
+        } catch (e) {
+          console.error('[notify] ✗ /match/notify failed:', e instanceof Error ? e.message : e)
+        }
+      } else {
+        console.debug(`[notify] top score below threshold (${NOTIFY_THRESHOLD * 100}%) → no cross-user notification`)
       }
     } catch (e) {
+      console.error('[match] ✗ /match/preview failed:', e instanceof Error ? e.message : e)
       setError(e instanceof Error ? e.message : 'No se pudo procesar la evidencia')
     } finally {
       setLoading(false)

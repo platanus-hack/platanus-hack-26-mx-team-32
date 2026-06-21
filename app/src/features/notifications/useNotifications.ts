@@ -12,16 +12,22 @@ export function useNotifications(enabled: boolean) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) {
+      console.debug('[notifs] disabled (no vínculo yet) — not subscribing')
+      return
+    }
     let cancelled = false
+    console.debug('[notifs] loading history + subscribing to realtime…')
 
     supabase
       .from('notificaciones')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(50)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (cancelled) return
+        if (error) console.error('[notifs] history load failed:', error.message, error)
+        else console.debug(`[notifs] loaded ${data?.length ?? 0} existing notification(s)`)
         setItems((data ?? []) as Notificacion[])
         setLoading(false)
       })
@@ -32,10 +38,14 @@ export function useNotifications(enabled: boolean) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notificaciones' },
         (payload) => {
+          console.debug('[notifs] ← realtime INSERT received:', payload.new)
           if (!cancelled) setItems((prev) => [payload.new as Notificacion, ...prev])
         },
       )
-      .subscribe()
+      .subscribe((status, err) => {
+        console.debug('[notifs] realtime channel status:', status)
+        if (err) console.error('[notifs] realtime channel error:', err)
+      })
 
     return () => {
       cancelled = true
