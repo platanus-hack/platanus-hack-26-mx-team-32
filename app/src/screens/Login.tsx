@@ -17,8 +17,7 @@ export function Login() {
   // Once authenticated (email or Google OAuth redirect), route onward.
   useEffect(() => {
     if (!session) return
-    const done = localStorage.getItem('onboarding_complete')
-    navigate(done ? '/home' : '/onboarding', { replace: true })
+    navigate('/home', { replace: true })
   }, [session, navigate])
 
   async function handleSubmit(e: React.FormEvent) {
