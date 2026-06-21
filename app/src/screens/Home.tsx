@@ -969,13 +969,31 @@ function timeAgo(ts: number, now: number): string {
 // Score at/above which a candidate is worth notifying the user about.
 const NOTIFY_THRESHOLD = 0.6
 
+// ── DEMO HARDCODE — happy-path linked persona (Michelle). Remove after demo. ──
+// Forces the linked person to Michelle so the demo doesn't depend on a vínculo /
+// onboarding / login. Her full ficha (señas, filiación) still loads from the
+// backend by id. To go back to real behavior: delete this const and the two
+// `DEMO_PERSONA` references in `readStoredPersona` and `selectedId`.
+const DEMO_PERSONA: PersonaSummary = {
+  id: 1028,
+  id_victimadirecta: '2a34ce13-3746-43ea-ba5c-c4b065c7d70a',
+  nombre: 'MICHELLE ITZAYANA',
+  primer_apellido: 'FUENTES',
+  segundo_apellido: 'CALDERON',
+  sexo: 'MUJER',
+  edad_actual: '15',
+  estado: 'MORELOS',
+  municipio: 'YAUTEPEC',
+  estatus_victima: 'DESAPARECIDA',
+}
+
 function readStoredPersona(): PersonaSummary | null {
   try {
     const raw = localStorage.getItem('selected_persona')
-    if (!raw) return null
+    if (!raw) return DEMO_PERSONA // demo fallback
     return JSON.parse(raw) as PersonaSummary
   } catch {
-    return null
+    return DEMO_PERSONA
   }
 }
 
@@ -1046,8 +1064,10 @@ export function Home() {
   // The single selected person — from the backend vinculo, or the onboarding
   // selection persisted to localStorage as a fallback.
   const selectedId = useMemo<number | null>(() => {
-    if (vinculo?.persona?.id != null) return vinculo.persona.id
-    return readStoredPersona()?.id ?? null
+    return DEMO_PERSONA.id // demo hardcode — always Michelle. Remove after demo.
+    // Real behavior:
+    // if (vinculo?.persona?.id != null) return vinculo.persona.id
+    // return readStoredPersona()?.id ?? null
   }, [vinculo])
 
   const selectedPersonOnMap = useMemo(
