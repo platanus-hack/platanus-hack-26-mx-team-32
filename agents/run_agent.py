@@ -6,6 +6,7 @@ Usage:
   uv run python run_agent.py extractor    --text "Se busca gente para el norte buen sueldo"
   uv run python run_agent.py case         --persona-id <uuid>
   uv run python run_agent.py recommender
+  uv run python run_agent.py pipeline     --query "fosas clandestinas jalisco 2024"
 """
 import argparse
 import json
@@ -19,6 +20,7 @@ try:
     from .social_intel_extractor import extractor_app
     from .missing_case_extractor import case_extractor_app
     from .review_recommender import recommender_app
+    from .fosas_pipeline import pipeline_app
 except ImportError:
     # When run as: cd agents && python run_agent.py (script mode)
     from db import create_task
@@ -27,11 +29,12 @@ except ImportError:
     from social_intel_extractor import extractor_app
     from missing_case_extractor import case_extractor_app
     from review_recommender import recommender_app
+    from fosas_pipeline import pipeline_app
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run a Hilo LangGraph agent")
-    parser.add_argument("agent", choices=["researcher", "acquirer", "extractor", "case", "recommender"])
+    parser.add_argument("agent", choices=["researcher", "acquirer", "extractor", "case", "recommender", "pipeline"])
     parser.add_argument("--query", default="")
     parser.add_argument("--url", default="")
     parser.add_argument("--text", default="")
@@ -64,7 +67,29 @@ def main():
         result = recommender_app.invoke({"task_id": task_id, "limit": args.limit, "pending_matches": [], "recommendations": [], "error": None})
         print(f"Enqueued {len(result.get('recommendations', []))} items for review")
 
-    err = result.get("error")
+    elif args.agent == "pipeline":
+        task_id = create_task("fosas-pipeline", {"query": args.query})
+        result = pipeline_app.invoke({
+            "task_id": task_id,
+            "query": args.query,
+            "scraped_pages": [],
+            "extracted_events": [],
+            "errors": [],
+        })
+        events = result.get("extracted_events", [])
+        errors = result.get("errors", [])
+        print(f"\nPages scraped:    {len(result.get('scraped_pages', []))}")
+        print(f"Events extracted: {len(events)}")
+        if events:
+            print(json.dumps(events, indent=2, ensure_ascii=False))
+        if errors:
+            print(f"\n[WARNINGS] {len(errors)} non-fatal errors:", file=sys.stderr)
+            for e in errors:
+                print(f"  - {e}", file=sys.stderr)
+
+    err = result.get("error") if args.agent != "pipeline" else (
+        "; ".join(result.get("errors", [])) if result.get("errors") else None
+    )
     if err:
         print(f"\n[ERROR] {err}", file=sys.stderr)
         sys.exit(1)

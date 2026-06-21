@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UserCircle, Home as HomeIcon, User, MessageCircle } from 'lucide-react'
 import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF } from '@react-google-maps/api'
@@ -37,7 +37,10 @@ interface MarkerData {
   date: string
 }
 
-const MARKERS: MarkerData[] = [
+const SERVER = 'http://localhost:3000'
+
+// Fallback markers shown when API returns no data
+const SEED_MARKERS: MarkerData[] = [
   { id: 1, lat: 19.74, lng: -101.19, type: 'fosas', name: 'Cerro de la Garza, Zamora', date: '14 feb 2024' },
   { id: 2, lat: 19.50, lng: -102.08, type: 'fosas', name: 'Rancho El Nance, Apatzingán', date: '3 ene 2024' },
   { id: 3, lat: 19.31, lng: -101.96, type: 'fosas', name: 'Camino Aguililla-Buenavista', date: '27 nov 2023' },
@@ -124,12 +127,36 @@ export function Home() {
   })
   const [vinculo, setVinculo] = useState<VinculoOut | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
+  const [riskMarkers, setRiskMarkers] = useState<MarkerData[]>([])
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
   })
 
-  // Case chat becomes available once another family joins/updates the case.
+  const fetchRiskEvents = useCallback(async () => {
+    try {
+      const res = await fetch(`${SERVER}/api/risk-events`)
+      if (!res.ok) return
+      const data = await res.json()
+      const markers: MarkerData[] = (data.features ?? []).map((f: any, i: number) => ({
+        id: 90000 + i,
+        lat: f.geometry.coordinates[1],
+        lng: f.geometry.coordinates[0],
+        type: f.properties.layer as FilterKey,
+        name: [f.properties.municipio, f.properties.estado].filter(Boolean).join(', ') || 'México',
+        date: (f.properties.reported_at ?? '').slice(0, 10),
+      }))
+      setRiskMarkers(markers)
+    } catch {}
+  }, [])
+
+  // Load on mount, poll every 30 s
+  useEffect(() => {
+    fetchRiskEvents()
+    const interval = setInterval(fetchRiskEvents, 30_000)
+    return () => clearInterval(interval)
+  }, [fetchRiskEvents])
+
   useEffect(() => {
     getMyVinculo().then(setVinculo).catch(() => setVinculo(null))
   }, [])
@@ -140,7 +167,9 @@ export function Home() {
     setFilters(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
-  const visibleMarkers = MARKERS.filter(m => filters[m.type])
+  // Use real markers when available, fall back to seed markers
+  const baseMarkers = riskMarkers.length > 0 ? riskMarkers : SEED_MARKERS
+  const visibleMarkers = baseMarkers.filter(m => filters[m.type])
 
   return (
     <div

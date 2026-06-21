@@ -20,10 +20,10 @@ _RISK_KEYWORDS = re.compile(
 )
 
 _SYSTEM = (
-    "Eres un extractor de eventos de riesgo social para México. "
+    "Eres un extractor de eventos de riesgo social y hallazgos forenses para México. "
     "Analiza el texto y responde con un objeto JSON con exactamente estos campos: "
-    "event_type (uno de: oferta_laboral_sospechosa, secuestro_levanton, "
-    "balacera_enfrentamiento, trata_enganche, narcomenudeo_contexto, "
+    "event_type (uno de: fosa_clandestina, hallazgo_restos, oferta_laboral_sospechosa, "
+    "secuestro_levanton, balacera_enfrentamiento, trata_enganche, narcomenudeo_contexto, "
     "control_territorial_contexto, otro), "
     "estado (string o null), municipio (string o null), "
     "summary (string breve, max 120 chars), "
@@ -87,7 +87,9 @@ def save_event_node(state: ExtractorState) -> dict:
                 "municipio": event.get("municipio"),
                 "summary_public": event.get("summary"),
                 "confidence": event.get("confidence", 0.3),
-                "severity": 4 if event.get("event_type") in (
+                "severity": 5 if event.get("event_type") in (
+                    "fosa_clandestina", "hallazgo_restos"
+                ) else 4 if event.get("event_type") in (
                     "secuestro_levanton", "trata_enganche"
                 ) else 2,
                 "privacy_level": "restricted",
