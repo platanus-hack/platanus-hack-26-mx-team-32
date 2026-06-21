@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { GoogleMap, useJsApiLoader, InfoWindowF } from '@react-google-maps/api'
-import { MarkerClusterer } from '@googlemaps/markerclusterer'
+import { MarkerClusterer, GridAlgorithm } from '@googlemaps/markerclusterer'
 import { AgentDot } from '../components/AgentDot'
 import { useSession, signInWithGoogle } from '../features/auth'
 import { useTheme } from '../features/theme'
@@ -20,23 +20,60 @@ const MAP_CENTER = { lat: 23.6345, lng: -102.5528 }
 const MAP_ZOOM = 5
 const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' }
 const MAP_STYLE_LIGHT: google.maps.MapTypeStyle[] = [
-  { elementType: 'geometry', stylers: [{ color: '#f5f0e8' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#9c9085' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ visibility: 'off' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'simplified' }] },
-  { featureType: 'administrative.country', elementType: 'geometry.stroke', stylers: [{ color: '#d4c5b3', weight: 1.2 }] },
-  { featureType: 'administrative.province', elementType: 'geometry.stroke', stylers: [{ color: '#e0d5c7', weight: 0.8 }] },
-  { featureType: 'administrative.locality', elementType: 'labels', stylers: [{ visibility: 'simplified' }] },
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f5f0e8' }] },
-  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#ede6da' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', stylers: [{ visibility: 'simplified' }, { color: '#e8dfd2' }] },
-  { featureType: 'road.highway', stylers: [{ visibility: 'simplified' }, { color: '#dcd1c0' }] },
-  { featureType: 'road.arterial', stylers: [{ visibility: 'simplified' }] },
-  { featureType: 'road.local', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dfe7e8' }] },
-  { featureType: 'water', elementType: 'labels.text', stylers: [{ color: '#a8b4b5' }] },
+    {
+        "featureType": "all",
+        "elementType": "labels.text",
+        "stylers": [
+            {
+                "color": "#878787"
+            }
+        ]
+    },
+    {
+        "featureType": "all",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+            {
+                "visibility": "off"
+            }
+        ]
+    },
+    {
+        "featureType": "landscape",
+        "elementType": "all",
+        "stylers": [
+            {
+                "color": "#f9f5ed"
+            }
+        ]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "all",
+        "stylers": [
+            {
+                "color": "#f5f5f5"
+            }
+        ]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "geometry.stroke",
+        "stylers": [
+            {
+                "color": "#c9c9c9"
+            }
+        ]
+    },
+    {
+        "featureType": "water",
+        "elementType": "all",
+        "stylers": [
+            {
+                "color": "#aee0f4"
+            }
+        ]
+    }
 ];
 
 const MAP_STYLE_DARK: google.maps.MapTypeStyle[] = [
@@ -75,18 +112,16 @@ function rgbToHex(r: number, g: number, b: number) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
 }
 
-const COLOR_OLD = hexToRgb('#fef08a')
-const COLOR_MID = hexToRgb('#f97316')
+const COLOR_OLD = hexToRgb('#f97316')
 const COLOR_RECENT = hexToRgb('#dc2626')
 
 function dateColor(ratio: number): string {
   const t = Math.max(0, Math.min(1, ratio))
-  if (t < 0.5) {
-    const k = t * 2
-    return rgbToHex(lerp(COLOR_OLD[0], COLOR_MID[0], k), lerp(COLOR_OLD[1], COLOR_MID[1], k), lerp(COLOR_OLD[2], COLOR_MID[2], k))
-  }
-  const k = (t - 0.5) * 2
-  return rgbToHex(lerp(COLOR_MID[0], COLOR_RECENT[0], k), lerp(COLOR_MID[1], COLOR_RECENT[1], k), lerp(COLOR_MID[2], COLOR_RECENT[2], k))
+  return rgbToHex(
+    lerp(COLOR_OLD[0], COLOR_RECENT[0], t),
+    lerp(COLOR_OLD[1], COLOR_RECENT[1], t),
+    lerp(COLOR_OLD[2], COLOR_RECENT[2], t),
+  )
 }
 
 function fullName(p: PersonOnMap) {
@@ -327,7 +362,7 @@ export function Landing() {
       return getMarkerIcon(dateColor(ratio))
     })
   }, [isLoaded])
-  const noDateIcon = useMemo(() => isLoaded ? getMarkerIcon('#fef08a') : null, [isLoaded])
+  const noDateIcon = useMemo(() => isLoaded ? getMarkerIcon('#f97316') : null, [isLoaded])
 
   const markerColor = useCallback((p: PersonOnMap) => {
     if (!iconBuckets) return noDateIcon!
@@ -362,25 +397,44 @@ export function Landing() {
         map,
         icon: markerColor(p),
       })
+      marker.set('person', p)
       marker.addListener('mouseover', () => setHovered(p))
       marker.addListener('mouseout', () => setHovered(null))
       marker.addListener('click', () => handleSelect(p))
       return marker
     })
     markersRef.current = markers
-    const clusterIcon = 'data:image/svg+xml;utf8,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="rgba(220,38,38,0.5)"/></svg>`
-    )
     const clusterer = new MarkerClusterer({
       markers,
       map,
+      algorithm: new GridAlgorithm({ gridSize: 10, maxZoom: 18 }),
       renderer: {
-        render({ count, position }) {
+        render({ count, position, markers: clusterMarkers }) {
+          let avgRatio = 0
+          let n = 0
+          if (clusterMarkers && minTs && maxTs && maxTs !== minTs) {
+            const span = maxTs - minTs
+            for (const m of clusterMarkers) {
+              const p = (m as google.maps.Marker).get('person') as PersonOnMap | undefined
+              if (p?.fecha_hechos) {
+                const ts = new Date(p.fecha_hechos).getTime()
+                if (!Number.isNaN(ts)) {
+                  avgRatio += Math.log(ts - minTs + 1) / Math.log(span + 1)
+                  n++
+                }
+              }
+            }
+          }
+          const color = n > 0 ? dateColor(avgRatio / n) : '#f97316'
+          const size = Math.min(72, 32 + Math.sqrt(count) * 6)
+          const svg = encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" opacity="0.7"/></svg>`
+          )
           return new google.maps.Marker({
             position,
             icon: {
-              url: clusterIcon,
-              scaledSize: new google.maps.Size(44, 44),
+              url: `data:image/svg+xml;utf8,${svg}`,
+              scaledSize: new google.maps.Size(size, size),
             },
             label: {
               text: String(count),
@@ -486,7 +540,7 @@ export function Landing() {
           <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Más antiguo</span>
           <div style={{
             width: 100, height: 8, borderRadius: 4,
-            background: 'linear-gradient(90deg, #fef08a, #f97316, #dc2626)',
+            background: 'linear-gradient(90deg, #f97316, #dc2626)',
           }} />
           <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Más reciente</span>
         </div>
