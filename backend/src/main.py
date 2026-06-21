@@ -35,6 +35,10 @@ app = FastAPI(title="Hilo Backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
+    # Allow any Vercel deploy (stable alias + per-deploy hash URLs) so the
+    # frontend isn't CORS-blocked on every new deployment. Regex is used
+    # because allow_credentials=True forbids the "*" wildcard.
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
