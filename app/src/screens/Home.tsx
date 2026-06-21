@@ -27,7 +27,7 @@ const MAP_STYLE: google.maps.MapTypeStyle[] = [
   { featureType: 'water', elementType: 'all', stylers: [{ color: '#aee0f4' }] },
 ]
 
-const CLUSTER_ICON_URL = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+const CLUSTER_ICON_URL = 'data:image/svg+xml,' + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="rgba(220,38,38,0.5)"/></svg>`
 )
 
@@ -70,7 +70,7 @@ const STATIC_MARKERS: StaticMarker[] = [
 function dotIcon(color: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="${color}" opacity="0.9" stroke="white" stroke-width="1.5"/></svg>`
   return {
-    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
     scaledSize: new google.maps.Size(14, 14),
     anchor: new google.maps.Point(7, 7),
   }
@@ -79,7 +79,7 @@ function dotIcon(color: string) {
 function personDotIcon() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#EF4444" opacity="0.9" stroke="white" stroke-width="1"/></svg>`
   return {
-    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
     scaledSize: new google.maps.Size(12, 12),
     anchor: new google.maps.Point(6, 6),
   }

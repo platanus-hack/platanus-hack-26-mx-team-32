@@ -8,9 +8,11 @@ from langgraph.graph import END, StateGraph
 
 try:
     from .config import settings
+    from .data_cleaner import clean_event
     from .db import finish_task, get_supabase
 except ImportError:
     from config import settings
+    from data_cleaner import clean_event
     from db import finish_task, get_supabase
 
 _RISK_KEYWORDS = re.compile(
@@ -81,21 +83,19 @@ def save_event_node(state: ExtractorState) -> dict:
         try:
             sb = get_supabase()
             now = datetime.now(timezone.utc).isoformat()
+            cleaned_event = clean_event(event, "social_risk_events")
+            cleaned_event.pop("_cleaned", None)
             sb.table("social_risk_events").insert({
-                "event_type": event.get("event_type", "otro"),
-                "estado": event.get("estado"),
-                "municipio": event.get("municipio"),
-                "summary_public": event.get("summary"),
-                "confidence": event.get("confidence", 0.3),
-                "severity": 5 if event.get("event_type") in (
-                    "fosa_clandestina", "hallazgo_restos"
-                ) else 4 if event.get("event_type") in (
-                    "secuestro_levanton", "trata_enganche"
-                ) else 2,
-                "privacy_level": "restricted",
-                "review_status": "pending",
+                "event_type": cleaned_event.get("event_type", "otro"),
+                "estado": cleaned_event.get("estado"),
+                "municipio": cleaned_event.get("municipio"),
+                "summary_public": cleaned_event.get("summary_public"),
+                "confidence": cleaned_event.get("confidence", 0.3),
+                "severity": cleaned_event.get("severity", 2),
+                "privacy_level": cleaned_event.get("privacy_level", "restricted"),
+                "review_status": cleaned_event.get("review_status", "pending"),
                 "reported_at": now,
-                "evidence_json": json.dumps({"source_url": state.get("source_url")}),
+                "evidence_json": cleaned_event.get("evidence_json") or json.dumps({"source_url": state.get("source_url")}),
             }).execute()
         except Exception as exc:
             supabase_error = str(exc)
