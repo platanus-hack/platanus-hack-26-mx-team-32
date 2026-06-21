@@ -4,21 +4,21 @@ import { Login } from './screens/Login'
 import { Onboarding } from './screens/Onboarding'
 import { Home } from './screens/Home'
 import { Profile } from './screens/Profile'
-import { ThemeProvider, ThemeToggle } from './features/theme'
+import { ThemeProvider } from './features/theme'
 
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/landing" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/home" element={<Home />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-        <ThemeToggle />
       </BrowserRouter>
     </ThemeProvider>
   )

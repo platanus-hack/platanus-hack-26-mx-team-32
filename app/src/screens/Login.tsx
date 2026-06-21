@@ -63,7 +63,7 @@ export function Login() {
               letterSpacing: '-0.02em',
             }}
           >
-            Rastro de Luz
+            Sendero
           </span>
         </div>
         <span
