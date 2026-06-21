@@ -3,7 +3,10 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from .db import finish_task, get_supabase
+try:
+    from .db import finish_task, get_supabase
+except ImportError:
+    from db import finish_task, get_supabase
 
 _TIER_WEIGHT = {"alta": 3.0, "media": 1.5, "baja": 0.5}
 _STALENESS_HALF_LIFE_S = 1800  # 30-minute half-life for freshness bonus

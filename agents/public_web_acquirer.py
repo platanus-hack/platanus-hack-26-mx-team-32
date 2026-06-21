@@ -4,8 +4,12 @@ from typing import TypedDict
 import httpx
 from langgraph.graph import END, StateGraph
 
-from .config import settings
-from .db import finish_task
+try:
+    from .config import settings
+    from .db import finish_task
+except ImportError:
+    from config import settings
+    from db import finish_task
 
 
 class AcquirerState(TypedDict):

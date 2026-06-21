@@ -3,7 +3,10 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from .db import finish_task, get_supabase
+try:
+    from .db import finish_task, get_supabase
+except ImportError:
+    from db import finish_task, get_supabase
 
 _SEXO_MAP = {"Hombre": "M", "Mujer": "F", "M": "M", "F": "F"}
 

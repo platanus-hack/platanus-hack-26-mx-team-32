@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 
 from supabase import Client, create_client
 
-from .config import settings
+try:
+    from .config import settings
+except ImportError:
+    from config import settings
 
 
 def get_supabase() -> Client:

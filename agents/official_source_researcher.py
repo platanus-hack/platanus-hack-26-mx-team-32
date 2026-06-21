@@ -5,8 +5,12 @@ from typing import TypedDict
 from anthropic import Anthropic
 from langgraph.graph import END, StateGraph
 
-from .config import settings
-from .db import finish_task, get_supabase
+try:
+    from .config import settings
+    from .db import finish_task, get_supabase
+except ImportError:
+    from config import settings
+    from db import finish_task, get_supabase
 
 
 class ResearcherState(TypedDict):
