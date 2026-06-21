@@ -1,6 +1,11 @@
 import { supabase } from './supabase'
 
-export const API_URL = import.meta.env.VITE_DEV
+// Vite's built-in DEV is true only under `vite dev` and false in `vite build`,
+// so production deploys never point at localhost. (The old `VITE_DEV` env var was
+// committed as `true` in app/.env, leaking http://localhost:8000 into the prod
+// bundle and breaking every backend call on the live site.) Local dev still hits
+// localhost:8000; prod uses VITE_API_URL or the deployed backend.
+export const API_URL = import.meta.env.DEV
   ? 'http://localhost:8000'
   : import.meta.env.VITE_API_URL || 'https://sendero-backend.paoloose.site'
 
