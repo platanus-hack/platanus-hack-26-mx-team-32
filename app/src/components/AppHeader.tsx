@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { UserCircle, LogOut, Moon, Sun } from 'lucide-react'
 import { AgentDot } from './AgentDot'
 import { useTheme } from '../features/theme'
+import { signOut } from '../features/auth'
 
 interface AppHeaderProps {
   /** Optional left-side node to render before the brand (e.g. a back button). */
@@ -61,8 +62,10 @@ export function AppHeader({ leftExtra, hideProfile = false }: AppHeaderProps) {
           {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
         </button>
         <button
-          onClick={() => {
+          onClick={async () => {
+            await signOut()
             localStorage.removeItem('onboarding_complete')
+            localStorage.removeItem('selected_persona')
             navigate('/login')
           }}
           style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-secondary)', fontSize: 13, fontFamily: 'var(--font-family)' }}
