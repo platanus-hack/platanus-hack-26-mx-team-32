@@ -332,6 +332,23 @@ async function geocodeLocation(locationText: string): Promise<GeocodeResult | nu
   }
 }
 
+async function parallelBatch<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, idx: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
   const summary: ScrapeSummary = {
     inserted: 0,
@@ -343,11 +360,9 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!supabaseUrl || !supabaseKey) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
-
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   if (!process.env.GOOGLE_MAPS_API_KEY) {
@@ -369,64 +384,128 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
     return summary;
   }
   summary.totalPostsSeen = posts.length;
+  console.log(`\nExtracting patterns from ${posts.length} posts (8 concurrent Claude calls)...`);
 
-  for (const post of posts) {
+  // Step 1: parallel Claude extractions (8 at a time — stays under rate limit)
+  const extractions = await parallelBatch(posts, 8, async (post, i) => {
     try {
-      const extraction = await extractPatternWithClaude(post);
-      const postDate = parseRelativeDate(post.content);
-
-      let geocode: GeocodeResult | null = null;
-      if (extraction.location_text) {
-        geocode = await geocodeLocation(extraction.location_text);
-        if (geocode) {
-          console.log(`Geocoded "${extraction.location_text}" → ${geocode.lat}, ${geocode.lng} (${geocode.region})`);
-        }
+      const result = await extractPatternWithClaude(post);
+      if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
+        console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
       }
+      return result;
+    } catch {
+      return { tone_description: null, tone_keywords: [], image_descriptions: [], location_text: null };
+    }
+  });
 
-      const row = {
-        id: randomUUID(),
-        post_url: post.url,
-        post_content: post.content,
-        tone_description: extraction.tone_description,
-        tone_keywords: extraction.tone_keywords,
-        image_urls: [],
-        image_descriptions: extraction.image_descriptions,
-        location_text: extraction.location_text,
-        location_latitude: geocode?.lat ?? null,
-        location_longitude: geocode?.lng ?? null,
-        location_region: geocode?.region ?? null,
-        scraped_at: new Date().toISOString(),
-        post_date: postDate,
-      };
+  // Step 2: parallel geocoding (all at once — Google Maps handles it)
+  const locationsToGeocode = extractions.map((e) => e.location_text);
+  const uniqueTexts = [...new Set(locationsToGeocode.filter(Boolean) as string[])];
+  console.log(`\nGeocoding ${uniqueTexts.length} unique locations in parallel...`);
 
-      console.log(`\n[${summary.inserted + summary.skipped + summary.failed + 1}/${posts.length}] ${post.url}`);
-      console.log(`  tone:     ${extraction.tone_description ?? "(none)"}`);
-      console.log(`  keywords: ${extraction.tone_keywords.length ? extraction.tone_keywords.join(", ") : "(none)"}`);
-      console.log(`  location: ${extraction.location_text ?? "(none)"}`);
-      console.log(`  date:     ${postDate ?? "(unknown)"}`);
-      if (extraction.image_descriptions.length) {
-        extraction.image_descriptions.forEach((d, i) => console.log(`  image[${i}]: ${d}`));
-      }
-
-      const { error } = await supabase
-        .from("facebook_patterns")
-        .upsert(row, { onConflict: "post_url" });
-
-      if (error) {
-        if (error.code === "23505") {
-          console.log(`  → skipped (duplicate)`);
-          summary.skipped += 1;
-        } else {
-          throw new Error(`facebook_patterns upsert failed for ${post.url}: ${error.message}`);
-        }
+  const geocodeCache = new Map<string, GeocodeResult | null>();
+  await Promise.all(
+    uniqueTexts.map(async (text) => {
+      const result = await geocodeLocation(text);
+      geocodeCache.set(text, result);
+      if (result) {
+        console.log(`  ✓ "${text}" → ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)} (${result.region})`);
       } else {
-        console.log(`  → inserted`);
-        summary.inserted += 1;
+        console.log(`  ✗ "${text}" → no result`);
       }
-    } catch (e) {
-      throw e instanceof Error ? e : new Error(String(e));
+    }),
+  );
+
+  // Step 3: build rows
+  const now = new Date().toISOString();
+  const rows = posts.map((post, i) => {
+    const extraction = extractions[i];
+    const geocode = extraction.location_text ? (geocodeCache.get(extraction.location_text) ?? null) : null;
+    return {
+      id: randomUUID(),
+      post_url: post.url,
+      post_content: post.content,
+      tone_description: extraction.tone_description,
+      tone_keywords: extraction.tone_keywords,
+      image_urls: [] as string[],
+      image_descriptions: extraction.image_descriptions,
+      location_text: extraction.location_text,
+      location_latitude: geocode?.lat ?? null,
+      location_longitude: geocode?.lng ?? null,
+      location_region: geocode?.region ?? null,
+      scraped_at: now,
+      post_date: parseRelativeDate(post.content),
+    };
+  });
+
+  // Step 4: batch upsert (Supabase handles up to 500 rows per call)
+  console.log(`\nUpserting ${rows.length} rows in batch...`);
+  const BATCH = 200;
+  for (let start = 0; start < rows.length; start += BATCH) {
+    const chunk = rows.slice(start, start + BATCH);
+    const { error } = await supabase
+      .from("facebook_patterns")
+      .upsert(chunk, { onConflict: "post_url" });
+    if (error) {
+      summary.errors.push(`Batch upsert error (rows ${start}–${start + chunk.length}): ${error.message}`);
+      summary.failed += chunk.length;
+    } else {
+      summary.inserted += chunk.length;
     }
   }
 
   return summary;
+}
+
+/**
+ * Retroactively geocode rows that have location_text but no coordinates.
+ * Call this after scrapeAndSeedFacebookPatterns to fill gaps from previous runs.
+ */
+export async function geocodeMissingLocations(): Promise<{ updated: number; failed: number }> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey || !process.env.GOOGLE_MAPS_API_KEY) return { updated: 0, failed: 0 };
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  const { data, error } = await supabase
+    .from("facebook_patterns")
+    .select("id, location_text")
+    .not("location_text", "is", null)
+    .is("location_latitude", null)
+    .limit(500);
+
+  if (error || !data || data.length === 0) return { updated: 0, failed: 0 };
+
+  console.log(`\nRetroactive geocoding: ${data.length} rows with location_text but no coordinates...`);
+
+  const uniqueTexts = [...new Set(data.map((r) => r.location_text as string))];
+  const cache = new Map<string, GeocodeResult | null>();
+  await Promise.all(
+    uniqueTexts.map(async (text) => {
+      cache.set(text, await geocodeLocation(text));
+    }),
+  );
+
+  let updated = 0;
+  let failed = 0;
+  await Promise.all(
+    data.map(async (row) => {
+      const geo = cache.get(row.location_text as string) ?? null;
+      if (!geo) { failed++; return; }
+      const { error: upErr } = await supabase
+        .from("facebook_patterns")
+        .update({
+          location_latitude: geo.lat,
+          location_longitude: geo.lng,
+          location_region: geo.region,
+        })
+        .eq("id", row.id);
+      if (upErr) { failed++; } else { updated++; }
+    }),
+  );
+
+  console.log(`Retroactive geocoding done: ${updated} updated, ${failed} failed`);
+  return { updated, failed };
 }
