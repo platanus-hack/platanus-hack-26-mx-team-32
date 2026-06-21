@@ -4,10 +4,12 @@ import { supabase } from './supabase'
 // so production deploys never point at localhost. (The old `VITE_DEV` env var was
 // committed as `true` in app/.env, leaking http://localhost:8000 into the prod
 // bundle and breaking every backend call on the live site.) Local dev still hits
-// localhost:8000; prod uses VITE_API_URL or the deployed backend.
+// localhost:8000; prod uses the Vercel same-origin proxy to avoid backend CORS.
+// Keep prod pinned to /api so local or Vercel VITE_API_URL values cannot
+// accidentally reintroduce cross-origin calls in the live demo.
 export const API_URL = import.meta.env.DEV
   ? 'http://localhost:8000'
-  : import.meta.env.VITE_API_URL || 'https://sendero-backend.paoloose.site'
+  : '/api'
 
 async function headers(extra?: Record<string, string>): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession()
