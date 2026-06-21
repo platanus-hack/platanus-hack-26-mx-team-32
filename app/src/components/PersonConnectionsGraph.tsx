@@ -142,9 +142,9 @@ export function PersonConnectionsGraph({ rootName, rootNarrative, relatedPeople,
       } | null
       if (!fg || !fg.d3Force) return
       const link = fg.d3Force('link')
-      if (link && typeof link.distance === 'function') link.distance(220)
+      if (link && typeof link.distance === 'function') link.distance(270)
       const charge = fg.d3Force('charge')
-      if (charge && typeof charge.strength === 'function') charge.strength(-380)
+      if (charge && typeof charge.strength === 'function') charge.strength(-300)
       if (typeof fg.d3ReheatSimulation === 'function') fg.d3ReheatSimulation()
     }, 50)
     return () => clearTimeout(t)

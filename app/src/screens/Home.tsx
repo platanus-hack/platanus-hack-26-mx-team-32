@@ -90,8 +90,8 @@ const STATIC_MARKERS: StaticMarker[] = [
   { id: 6, lat: 19.56, lng: -101.70, type: 'trabajos', name: 'Oferta Tlalpujahua – Pátzcuaro', date: '18 abr 2024' },
 ]
 
-function dotIcon(color: string) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="${color}" opacity="0.95" stroke="white" stroke-width="2.2"/></svg>`
+function dotIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="#EF4444" opacity="0.9"/></svg>`
   return {
     url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
     scaledSize: new google.maps.Size(22, 22),
@@ -100,7 +100,7 @@ function dotIcon(color: string) {
 }
 
 function personDotIcon() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#EF4444" opacity="0.9" stroke="white" stroke-width="1"/></svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#EF4444" opacity="0.9"/></svg>`
   return {
     url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
     scaledSize: new google.maps.Size(20, 20),
@@ -138,6 +138,7 @@ interface MapProps {
 
 function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, theme }: MapProps) {
   const [selectedStatic, setSelectedStatic] = useState<StaticMarker | null>(null)
+  const [hoveredPerson, setHoveredPerson] = useState<PersonOnMap | null>(null)
   const [mapReady, setMapReady] = useState(false)
   const mapRef = useRef<google.maps.Map | null>(null)
   const markersRef = useRef<google.maps.Marker[]>([])
@@ -168,7 +169,10 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
         position: { lat: p.lat, lng: p.lng },
         map,
         icon: personIcon,
+        title: fullName(p),
       })
+      marker.addListener('mouseover', () => setHoveredPerson(p))
+      marker.addListener('mouseout', () => setHoveredPerson(prev => (prev?.id === p.id ? null : prev)))
       return marker
     })
     markersRef.current = markers
@@ -177,6 +181,28 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
       markers,
       map,
       algorithm: new GridAlgorithm({ gridSize: 10, maxZoom: 18 }),
+      renderer: {
+        render({ count, position }) {
+          const size = Math.min(72, 32 + Math.sqrt(count) * 6)
+          const svg = encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="#EF4444" opacity="0.7"/></svg>`
+          )
+          return new google.maps.Marker({
+            position,
+            icon: {
+              url: `data:image/svg+xml;utf8,${svg}`,
+              scaledSize: new google.maps.Size(size, size),
+            },
+            label: {
+              text: String(count),
+              color: '#fff',
+              fontSize: '13px',
+              fontWeight: 'bold',
+            },
+            zIndex: 100,
+          })
+        },
+      },
     })
     clustererRef.current = clusterer
 
@@ -227,11 +253,11 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
           center={{ lat: m.lat, lng: m.lng }}
           radius={6000}
           options={{
-            fillColor: '#3B82F6',
+            fillColor: '#EF4444',
             fillOpacity: 0.18,
-            strokeColor: '#3B82F6',
-            strokeOpacity: 0.5,
-            strokeWeight: 1.5,
+            strokeColor: '#EF4444',
+            strokeOpacity: 0,
+            strokeWeight: 0,
             clickable: true,
           }}
           onClick={() => setSelectedStatic(m)}
@@ -242,7 +268,7 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
         <MarkerF
           key={m.id}
           position={{ lat: m.lat, lng: m.lng }}
-          icon={dotIcon(MARKER_COLORS.trabajos)}
+          icon={dotIcon()}
           onClick={() => setSelectedStatic(m)}
         />
       ))}
@@ -256,10 +282,42 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
           position={{ lat: selectedStatic.lat, lng: selectedStatic.lng }}
           onCloseClick={() => setSelectedStatic(null)}
         >
-          <div style={{ fontFamily: 'var(--font-family)', minWidth: 160 }}>
-            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{selectedStatic.name}</div>
-            <div style={{ fontSize: 11, color: '#6B6B6B', marginBottom: 4 }}>{FILTER_LABELS[selectedStatic.type]}</div>
-            <div style={{ fontSize: 11, color: MARKER_COLORS[selectedStatic.type], fontWeight: 500 }}>{selectedStatic.date}</div>
+          <div style={{ fontFamily: 'var(--font-family)', minWidth: 160, padding: '10px 12px' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, lineHeight: 1.35 }}>{selectedStatic.name}</div>
+            <div style={{ fontSize: 11, color: '#6B6B6B', marginBottom: 6, lineHeight: 1.45 }}>{FILTER_LABELS[selectedStatic.type]}</div>
+            <div style={{ fontSize: 11, color: MARKER_COLORS[selectedStatic.type], fontWeight: 500, lineHeight: 1.45 }}>{selectedStatic.date}</div>
+          </div>
+        </InfoWindowF>
+      )}
+
+      {hoveredPerson && (
+        <InfoWindowF
+          position={{ lat: hoveredPerson.lat, lng: hoveredPerson.lng }}
+          options={{ pixelOffset: new google.maps.Size(0, -8) }}
+          onCloseClick={() => setHoveredPerson(null)}
+          zIndex={50}
+        >
+          <div
+            data-testid="home-person-hover"
+            style={{ fontFamily: 'var(--font-family)', minWidth: 200, maxWidth: 260, padding: '12px 14px', color: 'var(--color-text-primary)' }}
+            onMouseEnter={() => setHoveredPerson(prev => prev?.id === hoveredPerson.id ? hoveredPerson : prev)}
+          >
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, lineHeight: 1.35 }}>{fullName(hoveredPerson)}</div>
+            <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 10, lineHeight: 1.5 }}>
+              {[hoveredPerson.edad_actual && `${hoveredPerson.edad_actual} años`, hoveredPerson.municipio, hoveredPerson.estado]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+            {hoveredPerson.fecha_hechos && (
+              <div style={{ fontSize: 11, color: '#EF4444', fontWeight: 500, lineHeight: 1.45 }}>
+                {new Date(hoveredPerson.fecha_hechos).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </div>
+            )}
+            {hoveredPerson.estatus_victima && (
+              <div style={{ fontSize: 10, marginTop: 8, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.45 }}>
+                {hoveredPerson.estatus_victima}
+              </div>
+            )}
           </div>
         </InfoWindowF>
       )}
