@@ -22,6 +22,20 @@ export interface ScrapeSummary {
   totalPostsSeen: number;
 }
 
+export const JOB_KEYWORDS = [
+  "trabajo", "empleo", "vacante", "sueldo", "salario",
+  "contratando", "puesto", "oferta", "uniforme", "plaza",
+  "reclutamiento", "candidatos", "entrevista", "whatsapp",
+  "pago", "depósito", "anticipo",
+] as const;
+
+export function filterJobPosts(posts: ScrapedPost[]): ScrapedPost[] {
+  return posts.filter((post) => {
+    const lower = post.content.toLowerCase();
+    return JOB_KEYWORDS.some((kw) => lower.includes(kw));
+  });
+}
+
 interface ClaudePatternExtraction {
   tone_description: string | null;
   tone_keywords: string[];
