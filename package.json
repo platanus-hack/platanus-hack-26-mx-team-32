@@ -10,6 +10,7 @@
     "demo": "tsx demo.ts",
     "dev:ui": "tsx app/server.ts",
     "scrape:facebook": "tsx scripts/scrape-facebook.ts",
+    "scrape:fakejobs": "tsx scripts/scrape-fakejobs.ts",
     "test:acquisition": "tsx scripts/test-acquisition.ts",
     "test:extractor:live": "tsx scripts/test-extractor-live.ts",
     "test:discovery": "tsx scripts/test-discovery.ts",
