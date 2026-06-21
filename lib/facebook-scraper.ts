@@ -46,6 +46,7 @@ interface JobPatternExtraction {
   salary_mentioned: string | null;
   upfront_fee: string | null;
   contact_method: string | null;
+  is_fake_job: boolean | null;
 }
 
 export function buildJobToneDescription(e: JobPatternExtraction): string | null {
@@ -64,38 +65,41 @@ async function extractJobPatternWithClaudeJob(post: ScrapedPost): Promise<JobPat
 
   const prompt = `You are a fake-job scam analyst for Mexico. Location accuracy is critical.
 
-Analyze this Facebook post. Images (if any) are screenshots — OCR them and use their text.
+IMAGE PROCESSING ORDER (for every image attached):
+  1. Read all visible text (OCR) — transcribe every word you can see.
+  2. Identify location signals in that text (addresses, landmarks, colonias, metro stations).
+  3. Analyze intent and tactics (recruitment promises, fees, urgency, contact methods).
 
 Extract in this PRIORITY ORDER:
 
-1. location_text — HIGHEST PRIORITY. The most specific location signal in the post or images:
+STEP 1 — LOCATION (HIGHEST PRIORITY):
+1. location_text — The most specific location signal in the post text OR in the OCR'd image text:
    exact street address, colonia, landmark, metro station, meeting point, hiring office address,
    directions, any WhatsApp-shared location reference. Return null ONLY if truly absent.
 
+STEP 2 — ADDITIONAL INFORMATION:
 2. job_title — the role being offered (e.g. "repartidor", "promotor", "cajera"). null if absent.
-
 3. company_name — company or brand name, even vague (e.g. "empresa seria", "importante compañía"). null if absent.
-
 4. salary_mentioned — any salary or daily rate mentioned (e.g. "$500 diarios", "sueldo quincenal"). null if absent.
-
 5. upfront_fee — any payment required from the applicant (uniform, kit, deposit, "inscripción"). null if absent.
-
 6. contact_method — how to apply: WhatsApp number, Telegram handle, email, etc. null if absent.
-
 7. tone_description — one sentence describing the scam tactic (e.g. "WhatsApp recruitment demanding uniform deposit").
-
 8. tone_keywords — array, only from this exact set:
    urgency, job_offer, payment_request, data_harvest, off_platform_contact,
    high_salary, vague_company, immediate_start, uniform_fee, investment_return,
    crypto, delivery_job
+9. image_descriptions — array describing what each image shows (after OCR and location extraction).
 
-9. image_descriptions — array describing what each image shows.
+STEP 3 — VERIFICATION:
+10. is_fake_job — boolean: true if this post shows clear signs of a fake or scam job offer
+    (upfront fees, vague company, unrealistic salary, off-platform contact, urgency tactics);
+    false if it appears to be a legitimate job post; null if insufficient information.
 
 Post text:
 ${post.content}
 
 Respond as STRICT JSON only (no markdown fences), exactly this shape:
-{"tone_description":string|null,"tone_keywords":[],"image_descriptions":[],"location_text":string|null,"job_title":string|null,"company_name":string|null,"salary_mentioned":string|null,"upfront_fee":string|null,"contact_method":string|null}`;
+{"tone_description":string|null,"tone_keywords":[],"image_descriptions":[],"location_text":string|null,"job_title":string|null,"company_name":string|null,"salary_mentioned":string|null,"upfront_fee":string|null,"contact_method":string|null,"is_fake_job":boolean|null}`;
 
   type ContentBlock =
     | { type: "text"; text: string }
@@ -119,7 +123,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1024,
-        system: "You are a fake-job scam analyst for Mexico. Location accuracy is critical — always extract the most specific location signal available. Output only valid JSON.",
+        system: "You are a fake-job scam analyst for Mexico. Location accuracy is critical — always extract the most specific location signal available. For images: first read all text (OCR), then identify location signals, then analyze intent. Output only valid JSON.",
         messages: [{ role: "user", content }],
       }),
     });
@@ -142,6 +146,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       salary_mentioned: parsed.salary_mentioned ?? null,
       upfront_fee: parsed.upfront_fee ?? null,
       contact_method: parsed.contact_method ?? null,
+      is_fake_job: typeof parsed.is_fake_job === "boolean" ? parsed.is_fake_job : null,
     };
   } catch (err) {
     console.warn(`extractJobPatternWithClaudeJob failed: ${err instanceof Error ? err.message : "unknown"}`);
@@ -155,6 +160,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       salary_mentioned: null,
       upfront_fee: null,
       contact_method: null,
+      is_fake_job: null,
     };
   }
 }
@@ -164,6 +170,7 @@ interface ClaudePatternExtraction {
   tone_keywords: string[];
   image_descriptions: string[];
   location_text: string | null;
+  is_fake_job: boolean | null;
 }
 
 /**
@@ -355,19 +362,37 @@ async function extractPatternWithClaude(post: ScrapedPost): Promise<ClaudePatter
     throw new Error("Missing ANTHROPIC_API_KEY environment variable");
   }
 
-  const prompt = `Analyze this Facebook scam-report post. The images attached (if any) are screenshots from the post — OCR them and use their text in your analysis.
+  const prompt = `Analyze this Facebook scam-report post.
 
-Extract:
-- tone_description: A short description of the scam tactic (e.g. "WhatsApp recruitment with upfront uniform fee")
-- tone_keywords: Array of tags from this exact set only: urgency, job_offer, payment_request, data_harvest, off_platform_contact, high_salary, vague_company, immediate_start, uniform_fee, investment_return, crypto, delivery_job
-- image_descriptions: Array describing what each image shows
-- location_text: The most specific location signal found in the post text OR images (address, neighborhood, landmark, city name, directions) — return null if none found.
+IMAGE PROCESSING ORDER (for every image attached):
+  1. Read all visible text (OCR) — transcribe every word you can see.
+  2. Identify location signals in that text (addresses, landmarks, colonias, metro stations).
+  3. Analyze intent and tactics (recruitment promises, fees, urgency, contact methods).
+
+Extract in this PRIORITY ORDER:
+
+STEP 1 — LOCATION (HIGHEST PRIORITY):
+- location_text: The most specific location signal found in the post text OR in the OCR'd image text
+  (street address, colonia, landmark, metro station, city name, directions).
+  Return null only if truly absent.
+
+STEP 2 — ADDITIONAL INFORMATION:
+- tone_description: A short description of the scam tactic (e.g. "WhatsApp recruitment with upfront uniform fee").
+- tone_keywords: Array of tags from this exact set only: urgency, job_offer, payment_request,
+  data_harvest, off_platform_contact, high_salary, vague_company, immediate_start, uniform_fee,
+  investment_return, crypto, delivery_job
+- image_descriptions: Array describing what each image shows (after OCR and location extraction).
+
+STEP 3 — VERIFICATION:
+- is_fake_job: boolean — true if this post shows signs of a fake or scam job offer
+  (upfront fees, vague company, unrealistic salary, off-platform contact, urgency);
+  false if it appears legitimate; null if insufficient information.
 
 Post text:
 ${post.content}
 
 Respond as STRICT JSON only (no markdown fences), exactly this shape:
-{"tone_description": string|null, "tone_keywords": string[], "image_descriptions": string[], "location_text": string|null}`;
+{"tone_description": string|null, "tone_keywords": string[], "image_descriptions": string[], "location_text": string|null, "is_fake_job": boolean|null}`;
 
   type ContentBlock =
     | { type: "text"; text: string }
@@ -391,7 +416,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1024,
-        system: "You are a scam-pattern analyst. You output only valid JSON. You never assert specific crimes, persons, or groups — only describe the tactic and pattern.",
+        system: "You are a scam-pattern analyst. For images: first read all text (OCR), then identify location signals, then analyze intent and tactics. You output only valid JSON. You never assert specific crimes, persons, or groups — only describe the tactic and pattern.",
         messages: [{ role: "user", content }],
       }),
     });
@@ -414,6 +439,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       tone_keywords: Array.isArray(parsed.tone_keywords) ? parsed.tone_keywords : [],
       image_descriptions: Array.isArray(parsed.image_descriptions) ? parsed.image_descriptions : [],
       location_text: parsed.location_text ?? null,
+      is_fake_job: typeof parsed.is_fake_job === "boolean" ? parsed.is_fake_job : null,
     };
   } catch {
     return {
@@ -421,6 +447,7 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       tone_keywords: [],
       image_descriptions: [],
       location_text: null,
+      is_fake_job: null,
     };
   }
 }
@@ -616,6 +643,7 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
       location_latitude: geocode?.lat ?? null,
       location_longitude: geocode?.lng ?? null,
       location_region: geocode?.region ?? null,
+      is_fake_job: extraction.is_fake_job ?? null,
       scraped_at: now,
       post_date: parseRelativeDate(post.content),
     };
@@ -777,6 +805,7 @@ export async function scrapeAndSeedFakeJobPatterns(): Promise<ScrapeSummary> {
       location_latitude: geocode?.lat ?? null,
       location_longitude: geocode?.lng ?? null,
       location_region: geocode?.region ?? null,
+      is_fake_job: extraction.is_fake_job ?? null,
       scraped_at: now,
       post_date: parseRelativeDate(post.content),
     };

@@ -6,6 +6,8 @@
 //   GET  /api/alerts       — pending matches above threshold for a linked person
 //   POST /api/extract      — normalize raw señas text → structured features
 //   POST /api/detect-offer — fake-job recruitment detector (CRUCE signals)
+//   GET  /api/risk-events  — social_risk_events from Supabase, geocoded to lat/lng markers
+//   POST /api/pipeline     — trigger Python fosas pipeline for a clicked map location + layer
 // Plus the reviewer UI + context/fosas/confirm/reject (RBAC).
 // Run: npm run dev:ui -> http://localhost:3000
 
@@ -13,6 +15,8 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
+import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { block } from "../lib/match/block.js";
@@ -27,6 +31,39 @@ const ROOT = join(__dirname, "..");
 const DB_PATH = join(ROOT, "hilo.db");
 const GEN = join(ROOT, "data", "generated");
 const PORT = process.env.PORT || 3000;
+
+// Load .env from repo root if env vars not already set
+if (!process.env.SUPABASE_URL) {
+  try {
+    const envPath = join(ROOT, ".env");
+    const lines = readFileSync(envPath, "utf-8").split("\n");
+    for (const line of lines) {
+      const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+    }
+  } catch {}
+}
+
+const sb = createClient(
+  process.env.SUPABASE_URL ?? "",
+  process.env.SUPABASE_KEY ?? "",
+);
+
+// Map event_type → map layer
+const EVENT_TYPE_LAYER: Record<string, string> = {
+  fosa_clandestina: "fosas", hallazgo_restos: "fosas",
+  secuestro_levanton: "desaparicion", balacera_enfrentamiento: "desaparicion",
+  control_territorial_contexto: "desaparicion", narcomenudeo_contexto: "desaparicion",
+  oferta_laboral_sospechosa: "trabajos", trata_enganche: "trabajos",
+  otro: "desaparicion",
+};
+
+// Map layer → search query template
+const LAYER_QUERY: Record<string, string> = {
+  fosas: "fosas clandestinas",
+  desaparicion: "desaparicion personas violencia",
+  trabajos: "ofertas laborales falsas enganche trata personas",
+};
 
 if (!existsSync(DB_PATH)) { console.error("Run `npm run seed` first."); process.exit(1); }
 
@@ -114,9 +151,81 @@ async function readBody(req: any): Promise<any> { return new Promise(res => { le
 
 // ─── HTTP ───
 const server = createServer(async (req, res) => {
+  // CORS — allow the Vite dev server (port 5173) to call this API
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const role = url.searchParams.get("role") || "reviewer";
   const db = () => new Database(DB_PATH);
+
+  // ── GET /api/risk-events — social_risk_events geocoded to map markers ──
+  if (url.pathname === "/api/risk-events") {
+    try {
+      const layerFilter = url.searchParams.get("layer");
+      const { data, error } = await sb
+        .from("social_risk_events")
+        .select("id,event_type,estado,municipio,summary_public,confidence,severity,reported_at,evidence_json")
+        .order("reported_at", { ascending: false })
+        .limit(200);
+
+      if (error) {
+        console.error("[risk-events] Supabase error:", error.message);
+        res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+      }
+
+      const features = (data ?? []).map((e: any) => {
+        const layer = EVENT_TYPE_LAYER[e.event_type] ?? "desaparicion";
+        if (layerFilter && layer !== layerFilter) return null;
+        const estadoPrimary = (e.estado ?? "").split(",")[0].trim();
+        const municipioPrimary = (e.municipio ?? "").split(",")[0].trim();
+        const coords = coordFor(estadoPrimary, municipioPrimary);
+        if (!coords) return null;
+        const [lat, lng] = coords;
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [lng, lat] },
+          properties: {
+            id: e.id, layer, event_type: e.event_type,
+            summary: e.summary_public, confidence: e.confidence,
+            severity: e.severity, estado: e.estado, municipio: e.municipio,
+            reported_at: e.reported_at,
+          },
+        };
+      }).filter(Boolean);
+
+      res.writeHead(200, jsonH());
+      res.end(JSON.stringify({ type: "FeatureCollection", total: features.length, features }));
+    } catch (err: any) {
+      console.error("[risk-events] unhandled exception:", err?.message ?? err);
+      res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
+    return;
+  }
+
+  // ── POST /api/pipeline — trigger Python pipeline for a map location + layer ──
+  if (url.pathname === "/api/pipeline" && req.method === "POST") {
+    const body = await readBody(req);
+    const location: string = body.location ?? "";
+    const layer: string = body.layer ?? "fosas";
+    const baseQuery = LAYER_QUERY[layer] ?? "fosas clandestinas";
+    const query = location ? `${baseQuery} ${location}` : baseQuery;
+
+    const agentsDir = join(ROOT, "agents");
+    const proc = spawn("uv", ["run", "python", "run_agent.py", "pipeline", "--query", query], {
+      cwd: agentsDir,
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    proc.unref();
+
+    res.writeHead(200, jsonH());
+    res.end(JSON.stringify({ ok: true, query, layer, location }));
+    return;
+  }
 
   if (url.pathname === "/") { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(html()); return; }
   if (url.pathname === "/api/health") { res.writeHead(200, jsonH()); res.end(JSON.stringify({ ok: true, recruitment_clusters: RECRUITMENT.total_clusters })); return; }
