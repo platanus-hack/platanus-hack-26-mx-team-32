@@ -6,7 +6,7 @@
 //   GET  /api/alerts       — pending matches above threshold for a linked person
 //   POST /api/extract      — normalize raw señas text → structured features
 //   POST /api/detect-offer — fake-job recruitment detector (CRUCE signals)
-//   GET  /api/risk-events  — social_risk_events from Supabase, geocoded to lat/lng markers
+//   GET  /api/risk-events  — map markers per layer (?layer=fosas|trabajos|desaparicion), each from its canonical Supabase table
 //   POST /api/pipeline     — trigger Python fosas pipeline for a clicked map location + layer
 // Plus the reviewer UI + context/fosas/confirm/reject (RBAC).
 // Run: npm run dev:ui -> http://localhost:3000
@@ -49,21 +49,24 @@ const sb = createClient(
   process.env.SUPABASE_KEY ?? "",
 );
 
-// Map event_type → map layer
-const EVENT_TYPE_LAYER: Record<string, string> = {
-  fosa_clandestina: "fosas", hallazgo_restos: "fosas",
-  secuestro_levanton: "desaparicion", balacera_enfrentamiento: "desaparicion",
-  control_territorial_contexto: "desaparicion", narcomenudeo_contexto: "desaparicion",
-  oferta_laboral_sospechosa: "trabajos", trata_enganche: "trabajos",
-  otro: "desaparicion",
-};
-
 // Map layer → search query template
 const LAYER_QUERY: Record<string, string> = {
   fosas: "fosas clandestinas",
   desaparicion: "desaparicion personas violencia",
   trabajos: "ofertas laborales falsas enganche trata personas",
 };
+
+// Fosa event types stored in social_risk_events. The cleaner remaps these to
+// 'otro' (DB CHECK constraint) and stashes the original in evidence_json.original_event_type,
+// so the read path has to recover them by looking at both fields.
+const FOSA_EVENT_TYPES = new Set(["fosa_clandestina", "hallazgo_restos"]);
+
+function tryParseJson(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw as Record<string, unknown>;
+  if (typeof raw !== "string") return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
 
 if (!existsSync(DB_PATH)) { console.error("Run `npm run seed` first."); process.exit(1); }
 
@@ -161,43 +164,133 @@ const server = createServer(async (req, res) => {
   const role = url.searchParams.get("role") || "reviewer";
   const db = () => new Database(DB_PATH);
 
-  // ── GET /api/risk-events — social_risk_events geocoded to map markers ──
+  // ── GET /api/risk-events — map markers per layer, each from its canonical table ──
+  //   layer=fosas         (default) → social_risk_events (filtered to fosa events)
+  //   layer=trabajos               → facebook_patterns (fake-job recruitment ads)
+  //   layer=desaparicion           → personas_desaparecidas (RNPDNO)
   if (url.pathname === "/api/risk-events") {
+    const layer = url.searchParams.get("layer") ?? "fosas";
     try {
-      const layerFilter = url.searchParams.get("layer");
-      const { data, error } = await sb
-        .from("social_risk_events")
-        .select("id,event_type,estado,municipio,summary_public,confidence,severity,reported_at,evidence_json")
-        .order("reported_at", { ascending: false })
-        .limit(200);
+      if (layer === "fosas") {
+        const { data, error } = await sb
+          .from("social_risk_events")
+          .select("id,event_type,estado,municipio,summary_public,confidence,severity,reported_at,evidence_json")
+          .order("reported_at", { ascending: false })
+          .limit(500);
 
-      if (error) {
-        console.error("[risk-events] Supabase error:", error.message);
-        res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+        if (error) {
+          console.error("[risk-events fosas] Supabase error:", error.message);
+          res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+        }
+
+        const features = (data ?? []).map((e: any) => {
+          const evidence = tryParseJson(e.evidence_json);
+          const originalType = (evidence.original_event_type as string | undefined) ?? null;
+          const isFosa =
+            FOSA_EVENT_TYPES.has(e.event_type) ||
+            (e.event_type === "otro" && originalType != null && FOSA_EVENT_TYPES.has(originalType));
+          if (!isFosa) return null;
+          const estadoPrimary = (e.estado ?? "").split(",")[0].trim();
+          const municipioPrimary = (e.municipio ?? "").split(",")[0].trim();
+          const coords = coordFor(estadoPrimary, municipioPrimary);
+          if (!coords) return null;
+          const [lat, lng] = coords;
+          return {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            properties: {
+              id: e.id, layer: "fosas",
+              event_type: originalType ?? e.event_type,
+              summary: e.summary_public, confidence: e.confidence,
+              severity: e.severity, estado: e.estado, municipio: e.municipio,
+              reported_at: e.reported_at,
+            },
+          };
+        }).filter(Boolean);
+
+        res.writeHead(200, jsonH());
+        res.end(JSON.stringify({ type: "FeatureCollection", layer: "fosas", total: features.length, features }));
+        return;
       }
 
-      const features = (data ?? []).map((e: any) => {
-        const layer = EVENT_TYPE_LAYER[e.event_type] ?? "desaparicion";
-        if (layerFilter && layer !== layerFilter) return null;
-        const estadoPrimary = (e.estado ?? "").split(",")[0].trim();
-        const municipioPrimary = (e.municipio ?? "").split(",")[0].trim();
-        const coords = coordFor(estadoPrimary, municipioPrimary);
-        if (!coords) return null;
-        const [lat, lng] = coords;
-        return {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [lng, lat] },
-          properties: {
-            id: e.id, layer, event_type: e.event_type,
-            summary: e.summary_public, confidence: e.confidence,
-            severity: e.severity, estado: e.estado, municipio: e.municipio,
-            reported_at: e.reported_at,
-          },
-        };
-      }).filter(Boolean);
+      if (layer === "trabajos") {
+        const { data, error } = await sb
+          .from("facebook_patterns")
+          .select("id,post_url,tone_description,tone_keywords,location_text,location_region,location_latitude,location_longitude,is_fake_job,scraped_at,post_date")
+          .order("scraped_at", { ascending: false })
+          .limit(500);
 
-      res.writeHead(200, jsonH());
-      res.end(JSON.stringify({ type: "FeatureCollection", total: features.length, features }));
+        if (error) {
+          console.error("[risk-events trabajos] Supabase error:", error.message);
+          res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+        }
+
+        const features = (data ?? []).map((r: any) => {
+          let lat: number | null = r.location_latitude ?? null;
+          let lng: number | null = r.location_longitude ?? null;
+          if (lat == null || lng == null) {
+            const region: string = (r.location_region ?? "").trim();
+            const coords = region ? coordFor(region, "") : null;
+            if (!coords) return null;
+            [lat, lng] = coords;
+          }
+          return {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            properties: {
+              id: r.id, layer: "trabajos",
+              post_url: r.post_url,
+              summary: r.tone_description,
+              tone_keywords: r.tone_keywords ?? [],
+              location_text: r.location_text,
+              location_region: r.location_region,
+              is_fake_job: r.is_fake_job,
+              reported_at: r.scraped_at ?? r.post_date,
+            },
+          };
+        }).filter(Boolean);
+
+        res.writeHead(200, jsonH());
+        res.end(JSON.stringify({ type: "FeatureCollection", layer: "trabajos", total: features.length, features }));
+        return;
+      }
+
+      if (layer === "desaparicion") {
+        const { data, error } = await sb
+          .from("personas_desaparecidas")
+          .select("id,id_victimadirecta,nombre,primer_apellido,segundo_apellido,estado,municipio,fecha_hechos,estatus_victima,latitud,longitud")
+          .not("latitud", "is", null)
+          .not("longitud", "is", null)
+          .limit(2000);
+
+        if (error) {
+          console.error("[risk-events desaparicion] Supabase error:", error.message);
+          res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+        }
+
+        const features = (data ?? []).map((p: any) => {
+          const fullName = [p.nombre, p.primer_apellido, p.segundo_apellido].filter(Boolean).join(" ").trim();
+          return {
+            type: "Feature",
+            geometry: { type: "Point", coordinates: [p.longitud, p.latitud] },
+            properties: {
+              id: p.id, layer: "desaparicion",
+              id_victimadirecta: p.id_victimadirecta,
+              summary: fullName || null,
+              estado: p.estado, municipio: p.municipio,
+              fecha_hechos: p.fecha_hechos,
+              estatus: p.estatus_victima,
+            },
+          };
+        });
+
+        res.writeHead(200, jsonH());
+        res.end(JSON.stringify({ type: "FeatureCollection", layer: "desaparicion", total: features.length, features }));
+        return;
+      }
+
+      res.writeHead(400, jsonH());
+      res.end(JSON.stringify({ error: "INVALID_LAYER", message: `unknown layer '${layer}' (expected: fosas, trabajos, desaparicion)` }));
     } catch (err: any) {
       console.error("[risk-events] unhandled exception:", err?.message ?? err);
       res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: err?.message ?? String(err) }));

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { User } from 'lucide-react'
 import { GoogleMap, useJsApiLoader, InfoWindowF } from '@react-google-maps/api'
 import { MarkerClusterer, GridAlgorithm } from '@googlemaps/markerclusterer'
 import { AgentDot } from '../components/AgentDot'
@@ -13,6 +14,8 @@ import {
   type PersonOnMap,
   type PersonDetail,
 } from '../features/landing/api'
+import { addMexicoBorders } from '../lib/mexico-borders'
+import { API_URL } from '../lib/http'
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
@@ -156,6 +159,30 @@ function getMarkerIcon(color: string): google.maps.Icon {
     scaledSize: new google.maps.Size(20, 20),
     anchor: new google.maps.Point(10, 10),
   }
+}
+
+function personFotoUrl(p: PersonOnMap, size = 80): string | null {
+  return p.id_victimadirecta ? `${API_URL}/personas/${p.id_victimadirecta}/foto?size=${size}` : null
+}
+
+function WeekPhoto({ person, size = 38 }: { person: PersonOnMap; size?: number }) {
+  const [err, setErr] = useState(false)
+  const url = personFotoUrl(person, size * 2)
+  if (!url || err) {
+    return (
+      <div style={{ width: size, height: size, borderRadius: '50%', background: 'var(--color-photo-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <User size={size * 0.45} color="var(--color-text-secondary)" />
+      </div>
+    )
+  }
+  return (
+    <img
+      src={url}
+      onError={() => setErr(true)}
+      alt=""
+      style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, background: 'var(--color-photo-bg)' }}
+    />
+  )
 }
 
 function HoverCard({ person }: { person: PersonOnMap }) {
@@ -354,6 +381,22 @@ export function Landing() {
 
   const earliestDate = useMemo(() => minTs ? new Date(minTs) : null, [minTs])
 
+  // "Desaparecidos esta semana" — most recent 7-day window present in the data.
+  const weekPersons = useMemo(() => {
+    const ts = persons
+      .map(p => new Date(p.fecha_hechos ?? '').getTime())
+      .filter(t => !Number.isNaN(t))
+    if (ts.length === 0) return []
+    const maxTs = Math.max(...ts)
+    const start = maxTs - 7 * 86400000
+    return persons
+      .filter(p => {
+        const t = new Date(p.fecha_hechos ?? '').getTime()
+        return !Number.isNaN(t) && t >= start && t <= maxTs
+      })
+      .sort((a, b) => new Date(b.fecha_hechos ?? '').getTime() - new Date(a.fecha_hechos ?? '').getTime())
+  }, [persons])
+
   const NUM_BUCKETS = 20
   const iconBuckets = useMemo(() => {
     if (!isLoaded) return null
@@ -454,7 +497,15 @@ export function Landing() {
       markersRef.current = []
       clustererRef.current = null
     }
-  }, [isLoaded, mapReady, persons, iconBuckets, markerColor, handleSelect])
+  }, [isLoaded, mapReady, persons, iconBuckets, markerColor, handleSelect, minTs, maxTs])
+
+  // Thick Mexico state borders, re-styled when the theme flips.
+  useEffect(() => {
+    if (!isLoaded || !mapReady) return
+    if (mapRef.current) {
+      addMexicoBorders(mapRef.current, theme)
+    }
+  }, [isLoaded, mapReady, theme])
 
   return (
     <div style={{ height: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
@@ -590,7 +641,6 @@ export function Landing() {
           )}
         </div>
       </div>
-
       {/* Legend */}
       <div className="glass" style={{
         position: 'absolute',
@@ -637,7 +687,11 @@ export function Landing() {
             fullscreenControl: false,
             mapTypeControl: false,
             streetViewControl: false,
-            zoomControl: true,
+            zoomControl: false,
+            rotateControl: false,
+            scaleControl: false,
+            panControl: false,
+            gestureHandling: 'greedy',
           }}
         >
           {hovered && !selected && (

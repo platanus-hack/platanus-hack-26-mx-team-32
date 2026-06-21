@@ -61,12 +61,18 @@ async def list_personas(
     if sexo:
         query = query.eq("sexo", sexo)
     if q:
-        pat = f"%{q}%"
-        query = query.or_(
-            f"nombre.ilike.{pat},"
-            f"primer_apellido.ilike.{pat},"
-            f"segundo_apellido.ilike.{pat}"
-        )
+        # Each whitespace-delimited word must match (AND) in any of the three
+        # name columns (OR). PostgREST's top-level filters are ANDed together,
+        # so chaining one .or_() per word gives us word-AND × field-OR.
+        for word in q.split():
+            if not word:
+                continue
+            pat = f"%{word}%"
+            query = query.or_(
+                f"nombre.ilike.{pat},"
+                f"primer_apellido.ilike.{pat},"
+                f"segundo_apellido.ilike.{pat}"
+            )
     query = query.order("id").range(offset, offset + limit - 1)
     res = await query.execute()
     return res.data, res.count or 0
@@ -87,7 +93,7 @@ async def get_persona_by_victima(sb: AsyncClient, victima_id: str) -> dict | Non
     """Full detail row keyed by the stable natural key id_victimadirecta."""
     res = (
         await sb.table(TABLE)
-        .select(DETAIL_COLS + ",id_victimadirecta")
+        .select(DETAIL_COLS)
         .eq("id_victimadirecta", victima_id)
         .limit(1)
         .execute()

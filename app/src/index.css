@@ -300,3 +300,27 @@
   display: none !important;
 }
 
+/* Thin, theme-aware scrollbars for scrollable surfaces (dropdowns, panels, etc). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 146, 29, 0.45) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(242, 146, 29, 0.45);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(242, 146, 29, 0.65);
+}
+

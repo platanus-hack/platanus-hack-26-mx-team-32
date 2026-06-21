@@ -4,6 +4,7 @@ from starlette.concurrency import run_in_threadpool
 from supabase import AsyncClient
 from src.deps import get_supabase
 from ..auth.dependencies import get_current_user
+from ..personas import service as personas_service
 from ..personas.schemas import PersonaDetail
 from .schemas import FirecrawlSearchRequest, NewsRequest, NewsResponse
 from src.config import settings

@@ -356,8 +356,10 @@ export function Profile() {
         <span style={{ fontSize: 16, fontWeight: 500, color: '#1A1A1A' }}>Mi perfil</span>
 
         <button
-          onClick={() => {
+          onClick={async () => {
+            await supabase.auth.signOut()
             localStorage.removeItem('onboarding_complete')
+            localStorage.removeItem('selected_persona')
             navigate('/login')
           }}
           style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: '#6B6B6B', fontSize: 13, fontFamily: 'var(--font-family)' }}
