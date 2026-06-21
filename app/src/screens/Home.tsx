@@ -7,7 +7,7 @@ import { AgentDot } from '../components/AgentDot'
 import { ChatDrawer } from '../components/ChatDrawer'
 import { getMyVinculo } from '../features/profile/api'
 import { fullName, type VinculoOut } from '../features/profile/types'
-import { fetchPersonsOnMap, type PersonOnMap } from '../features/landing/api'
+import { fetchPersonsOnMap, fetchFosasOnMap, fetchTrabajosOnMap, type PersonOnMap } from '../features/landing/api'
 import { matchPreview, notifyMatch } from '../features/matching/api'
 import type { PreviewCandidate } from '../features/matching/types'
 import { useNotifications } from '../features/notifications'
@@ -52,20 +52,13 @@ const CHIP_COLORS: Record<FilterKey, { activeBg: string; activeText: string; act
 }
 
 interface StaticMarker {
-  id: number
+  id: string
   lat: number
   lng: number
   type: 'fosas' | 'trabajos'
   name: string
   date: string
 }
-
-const STATIC_MARKERS: StaticMarker[] = [
-  { id: 1, lat: 19.74, lng: -101.19, type: 'fosas', name: 'Cerro de la Garza, Zamora', date: '14 feb 2024' },
-  { id: 2, lat: 19.50, lng: -102.08, type: 'fosas', name: 'Rancho El Nance, Apatzingán', date: '3 ene 2024' },
-  { id: 3, lat: 19.31, lng: -101.96, type: 'fosas', name: 'Camino Aguililla-Buenavista', date: '27 nov 2023' },
-  { id: 6, lat: 19.56, lng: -101.70, type: 'trabajos', name: 'Oferta Tlalpujahua – Pátzcuaro', date: '18 abr 2024' },
-]
 
 function dotIcon(color: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="${color}" opacity="0.95" stroke="white" stroke-width="2.2"/></svg>`
@@ -645,6 +638,7 @@ export function Home() {
   const [vinculo, setVinculo] = useState<VinculoOut | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [persons, setPersons] = useState<PersonOnMap[]>([])
+  const [staticMarkers, setStaticMarkers] = useState<StaticMarker[]>([])
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [notifs, setNotifs] = useState<Notif[]>(NOTIFICATIONS)
@@ -696,6 +690,11 @@ export function Home() {
   useEffect(() => {
     getMyVinculo().then(setVinculo).catch(() => setVinculo(null))
     fetchPersonsOnMap().then(setPersons).catch(() => setPersons([]))
+    // fosas (social_risk_events) + trabajos falsos (facebook_patterns) map layers
+    Promise.all([
+      fetchFosasOnMap().catch(() => []),
+      fetchTrabajosOnMap().catch(() => []),
+    ]).then(([fosas, trabajos]) => setStaticMarkers([...fosas, ...trabajos]))
   }, [])
 
   const chatReady = !!vinculo?.chat_unlocked && !!vinculo?.persona
@@ -813,7 +812,7 @@ export function Home() {
           <div style={{ flex: 1, position: 'relative', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(242,195,133,0.35)' }}>
             {isLoaded ? (
               <Map
-                staticMarkers={STATIC_MARKERS}
+                staticMarkers={staticMarkers}
                 persons={persons}
                 showPersons={filters.desaparicion}
                 filters={filters}
