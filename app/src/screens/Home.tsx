@@ -391,7 +391,7 @@ const evSelect: React.CSSProperties = {
   paddingRight: 34,
 }
 
-function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
+function UploadEvidenceModal({ onClose, onMatch }: { onClose: () => void; onMatch: (c: PreviewCandidate) => void }) {
   const [desc, setDesc] = useState('')
   const [fileName, setFileName] = useState<string | null>(null)
   const [sexo, setSexo] = useState('')
@@ -427,6 +427,9 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
         senas: desc.trim() ? [desc.trim()] : undefined,
       })
       setResults(res.candidatos)
+      // Strong match → push a live notification card to Inicio.
+      const top = res.candidatos[0]
+      if (top && top.score >= NOTIFY_THRESHOLD) onMatch(top)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo procesar la evidencia')
     } finally {
@@ -610,6 +613,11 @@ const NOTIFICATIONS = [
   },
 ]
 
+type Notif = { id: number; title: string; desc: string; time: string; isNew?: boolean }
+
+// Score at/above which a candidate is worth notifying the user about.
+const NOTIFY_THRESHOLD = 0.7
+
 export function Home() {
   const navigate = useNavigate()
   const [filters, setFilters] = useState<Record<FilterKey, boolean>>({
@@ -622,6 +630,21 @@ export function Home() {
   const [persons, setPersons] = useState<PersonOnMap[]>([])
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [notifs, setNotifs] = useState<Notif[]>(NOTIFICATIONS)
+
+  // A real match (score ≥ threshold) prepends a live card to "Notificaciones recientes".
+  function addMatchNotif(c: PreviewCandidate) {
+    setNotifs(prev => [
+      {
+        id: Date.now(),
+        title: 'Nueva coincidencia detectada',
+        desc: `Coincidencia ${c.tier} con ${c.nombre ?? 'un registro'} — ${(c.score * 100).toFixed(0)}% de similitud.`,
+        time: 'ahora',
+        isNew: true,
+      },
+      ...prev,
+    ])
+  }
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -800,10 +823,10 @@ export function Home() {
               Buscar coincidencias
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {NOTIFICATIONS.map(n => (
+              {notifs.map(n => (
                 <div
                   key={n.id}
-                  className="glass"
+                  className={n.isNew ? 'glass anim-fade-in' : 'glass'}
                   style={{
                     padding: '14px 18px',
                     borderLeft: '3px solid #F2921D',
@@ -962,7 +985,7 @@ export function Home() {
         </button>
       )}
 
-      {uploadOpen && <UploadEvidenceModal onClose={() => setUploadOpen(false)} />}
+      {uploadOpen && <UploadEvidenceModal onClose={() => setUploadOpen(false)} onMatch={addMatchNotif} />}
       {evidenceOpen && <EvidenceModal onClose={() => setEvidenceOpen(false)} />}
 
       {chatReady && vinculo?.persona && (
