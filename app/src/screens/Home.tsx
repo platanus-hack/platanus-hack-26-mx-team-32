@@ -901,7 +901,7 @@ const NOTIFICATIONS = [
 type Notif = { id: number | string; title: string; desc: string; time: string; isNew?: boolean }
 
 // Score at/above which a candidate is worth notifying the user about.
-const NOTIFY_THRESHOLD = 0.7
+const NOTIFY_THRESHOLD = 0.6
 
 function readStoredPersona(): PersonaSummary | null {
   try {

@@ -116,3 +116,10 @@ hilo/
 > "El BNDF fue mandatado por ley en 2017 para ser esta capa conectiva. No funciona — los datos de desaparecidos y cuerpos viven en silos incompatibles (Excel de fiscalía, WhatsApp de colectivo, ficha escaneada de SEMEFO). Hilo demuestra que la capa funciona, de forma segura: resolvemos **señas** en vocabulario controlado para que 'ancla brazo der.' (semefo) coincida con 'tatuaje de áncora en antebrazo derecho' (ficha); la lateralidad descarta near-misses; un verificador separado prioriza para revisión humana y **nunca concluye**; las coordenadas de fosas se protegen por rol. Lo demostramos sobre datos sintéticos calibrados por el RNPDNO real, porque usar víctimas reales sin consentimiento familiar es ilegal y poco ético — y eso mismo es lo que hace falta para adoptarlo con datos reales."
 
 **Rúbrica:** Técnico (multi-agente dual-plane + record-linkage) · Ambición (capa que el Estado no construyó) · Ejecución (demo punta a punta) · Impacto (84,430 desaparecidos) · Originalidad (nadie más hace linkage forense).
+
+
+#START BACKEND
+  uv run uvicorn src.main:app --reload --port 8000
+
+#START FRONTEND
+    bun run dev
