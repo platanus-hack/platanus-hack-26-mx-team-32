@@ -58,6 +58,106 @@ export function buildJobToneDescription(e: JobPatternExtraction): string | null 
   return `${prefix}${e.tone_description ?? ""}`.trim() || null;
 }
 
+async function extractJobPatternWithClaudeJob(post: ScrapedPost): Promise<JobPatternExtraction> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
+
+  const prompt = `You are a fake-job scam analyst for Mexico. Location accuracy is critical.
+
+Analyze this Facebook post. Images (if any) are screenshots — OCR them and use their text.
+
+Extract in this PRIORITY ORDER:
+
+1. location_text — HIGHEST PRIORITY. The most specific location signal in the post or images:
+   exact street address, colonia, landmark, metro station, meeting point, hiring office address,
+   directions, any WhatsApp-shared location reference. Return null ONLY if truly absent.
+
+2. job_title — the role being offered (e.g. "repartidor", "promotor", "cajera"). null if absent.
+
+3. company_name — company or brand name, even vague (e.g. "empresa seria", "importante compañía"). null if absent.
+
+4. salary_mentioned — any salary or daily rate mentioned (e.g. "$500 diarios", "sueldo quincenal"). null if absent.
+
+5. upfront_fee — any payment required from the applicant (uniform, kit, deposit, "inscripción"). null if absent.
+
+6. contact_method — how to apply: WhatsApp number, Telegram handle, email, etc. null if absent.
+
+7. tone_description — one sentence describing the scam tactic (e.g. "WhatsApp recruitment demanding uniform deposit").
+
+8. tone_keywords — array, only from this exact set:
+   urgency, job_offer, payment_request, data_harvest, off_platform_contact,
+   high_salary, vague_company, immediate_start, uniform_fee, investment_return,
+   crypto, delivery_job
+
+9. image_descriptions — array describing what each image shows.
+
+Post text:
+${post.content}
+
+Respond as STRICT JSON only (no markdown fences), exactly this shape:
+{"tone_description":string|null,"tone_keywords":[],"image_descriptions":[],"location_text":string|null,"job_title":string|null,"company_name":string|null,"salary_mentioned":string|null,"upfront_fee":string|null,"contact_method":string|null}`;
+
+  type ContentBlock =
+    | { type: "text"; text: string }
+    | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } };
+
+  const imageBlocks: ContentBlock[] = post.imageBase64.map((data) => ({
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data },
+  }));
+
+  const content: ContentBlock[] = [...imageBlocks, { type: "text", text: prompt }];
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        system: "You are a fake-job scam analyst for Mexico. Location accuracy is critical — always extract the most specific location signal available. Output only valid JSON.",
+        messages: [{ role: "user", content }],
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Claude API error: ${response.statusText}`);
+
+    const data = await response.json() as { content: Array<{ type: string; text: string }> };
+    const textBlock = data.content.find((b) => b.type === "text");
+    const raw = textBlock?.text ?? "";
+    const sanitized = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    const parsed = JSON.parse(sanitized) as JobPatternExtraction;
+
+    return {
+      tone_description: parsed.tone_description ?? null,
+      tone_keywords: Array.isArray(parsed.tone_keywords) ? parsed.tone_keywords : [],
+      image_descriptions: Array.isArray(parsed.image_descriptions) ? parsed.image_descriptions : [],
+      location_text: parsed.location_text ?? null,
+      job_title: parsed.job_title ?? null,
+      company_name: parsed.company_name ?? null,
+      salary_mentioned: parsed.salary_mentioned ?? null,
+      upfront_fee: parsed.upfront_fee ?? null,
+      contact_method: parsed.contact_method ?? null,
+    };
+  } catch {
+    return {
+      tone_description: null,
+      tone_keywords: [],
+      image_descriptions: [],
+      location_text: null,
+      job_title: null,
+      company_name: null,
+      salary_mentioned: null,
+      upfront_fee: null,
+      contact_method: null,
+    };
+  }
+}
+
 interface ClaudePatternExtraction {
   tone_description: string | null;
   tone_keywords: string[];
@@ -373,6 +473,14 @@ async function geocodeLocation(locationText: string): Promise<GeocodeResult | nu
       const res = await fetch(queryUrl.toString());
       if (!res.ok) return null;
       const data = await res.json() as GeocodeResponse;
+      if (data.status === "REQUEST_DENIED") {
+        console.error(
+          `[geocode] REQUEST_DENIED — GOOGLE_MAPS_API_KEY is invalid or not a Maps Platform key.\n` +
+          `  Current value looks like an OAuth client ID (ends with .apps.googleusercontent.com).\n` +
+          `  Get a real key from https://console.cloud.google.com → APIs → Geocoding API → Credentials.`,
+        );
+        return null;
+      }
       if (data.status !== "OK" || data.results.length === 0) return null;
       const first = data.results[0];
       const { lat, lng } = first.geometry.location;
@@ -452,13 +560,23 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
   // Step 1: parallel Claude extractions (8 at a time — stays under rate limit)
   const extractions = await parallelBatch(posts, 8, async (post, i) => {
     try {
-      const result = await extractPatternWithClaude(post);
+      const result = await extractJobPatternWithClaudeJob(post);
       if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
         console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
       }
       return result;
     } catch {
-      return { tone_description: null, tone_keywords: [], image_descriptions: [], location_text: null };
+      return {
+        tone_description: null,
+        tone_keywords: [],
+        image_descriptions: [],
+        location_text: null,
+        job_title: null,
+        company_name: null,
+        salary_mentioned: null,
+        upfront_fee: null,
+        contact_method: null,
+      };
     }
   });
 
@@ -489,7 +607,7 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
       id: randomUUID(),
       post_url: post.url,
       post_content: post.content,
-      tone_description: extraction.tone_description,
+      tone_description: buildJobToneDescription(extraction),
       tone_keywords: extraction.tone_keywords,
       image_urls: [] as string[],
       image_descriptions: extraction.image_descriptions,
@@ -571,4 +689,126 @@ export async function geocodeMissingLocations(): Promise<{ updated: number; fail
 
   console.log(`Retroactive geocoding done: ${updated} updated, ${failed} failed`);
   return { updated, failed };
+}
+
+export async function scrapeAndSeedFakeJobPatterns(): Promise<ScrapeSummary> {
+  const summary: ScrapeSummary = {
+    inserted: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+    totalPostsSeen: 0,
+  };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    console.warn("Warning: GOOGLE_MAPS_API_KEY not set — geocoding will be skipped");
+  }
+
+  let allPosts: ScrapedPost[] = [];
+  try {
+    allPosts = await fetchFacebookGroupPosts(FACEBOOK_GROUP_URL);
+  } catch (e) {
+    summary.errors.push(`Playwright scrape failed: ${e instanceof Error ? e.message : "unknown"}`);
+    summary.failed += 1;
+    return summary;
+  }
+
+  summary.totalPostsSeen = allPosts.length;
+
+  const posts = filterJobPosts(allPosts);
+  console.log(`\nJob-filter: ${posts.length} job-related posts (from ${allPosts.length} total)`);
+
+  if (posts.length === 0) {
+    console.warn("No job-related posts found after filter — nothing to process");
+    summary.skipped = allPosts.length;
+    return summary;
+  }
+
+  console.log(`\nExtracting job patterns from ${posts.length} posts (8 concurrent Claude calls)...`);
+  const extractions = await parallelBatch(posts, 8, async (post, i) => {
+    try {
+      const result = await extractJobPatternWithClaudeJob(post);
+      if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
+        console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
+      }
+      return result;
+    } catch {
+      return {
+        tone_description: null,
+        tone_keywords: [],
+        image_descriptions: [],
+        location_text: null,
+        job_title: null,
+        company_name: null,
+        salary_mentioned: null,
+        upfront_fee: null,
+        contact_method: null,
+      };
+    }
+  });
+
+  const uniqueTexts = [...new Set(
+    extractions.map((e) => e.location_text).filter(Boolean) as string[]
+  )];
+  console.log(`\nGeocoding ${uniqueTexts.length} unique locations in parallel...`);
+
+  const geocodeCache = new Map<string, Awaited<ReturnType<typeof geocodeLocation>>>();
+  await Promise.all(
+    uniqueTexts.map(async (text) => {
+      const result = await geocodeLocation(text);
+      geocodeCache.set(text, result);
+      if (result) {
+        console.log(`  ✓ "${text}" → ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)} (${result.region})`);
+      } else {
+        console.log(`  ✗ "${text}" → no result`);
+      }
+    }),
+  );
+
+  const now = new Date().toISOString();
+  const rows = posts.map((post, i) => {
+    const extraction = extractions[i];
+    const geocode = extraction.location_text
+      ? (geocodeCache.get(extraction.location_text) ?? null)
+      : null;
+    return {
+      id: randomUUID(),
+      post_url: post.url,
+      post_content: post.content,
+      tone_description: buildJobToneDescription(extraction),
+      tone_keywords: extraction.tone_keywords,
+      image_urls: [] as string[],
+      image_descriptions: extraction.image_descriptions,
+      location_text: extraction.location_text,
+      location_latitude: geocode?.lat ?? null,
+      location_longitude: geocode?.lng ?? null,
+      location_region: geocode?.region ?? null,
+      scraped_at: now,
+      post_date: parseRelativeDate(post.content),
+    };
+  });
+
+  console.log(`\nUpserting ${rows.length} rows in batch...`);
+  const BATCH = 200;
+  for (let start = 0; start < rows.length; start += BATCH) {
+    const chunk = rows.slice(start, start + BATCH);
+    const { error } = await supabase
+      .from("facebook_patterns")
+      .upsert(chunk, { onConflict: "post_url" });
+    if (error) {
+      summary.errors.push(`Batch upsert error (rows ${start}–${start + chunk.length}): ${error.message}`);
+      summary.failed += chunk.length;
+    } else {
+      summary.inserted += chunk.length;
+    }
+  }
+
+  return summary;
 }
