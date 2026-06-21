@@ -475,7 +475,7 @@ export function Landing() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <AgentDot size={22} pulse />
           <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)', letterSpacing: '-0.01em' }}>
-            Rastro de Luz
+            Sendero
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

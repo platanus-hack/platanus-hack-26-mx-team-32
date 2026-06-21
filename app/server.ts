@@ -163,37 +163,45 @@ const server = createServer(async (req, res) => {
 
   // ── GET /api/risk-events — social_risk_events geocoded to map markers ──
   if (url.pathname === "/api/risk-events") {
-    const layerFilter = url.searchParams.get("layer");
-    const { data, error } = await sb
-      .from("social_risk_events")
-      .select("id,event_type,estado,municipio,summary_public,confidence,severity,reported_at,evidence_json")
-      .order("reported_at", { ascending: false })
-      .limit(200);
+    try {
+      const layerFilter = url.searchParams.get("layer");
+      const { data, error } = await sb
+        .from("social_risk_events")
+        .select("id,event_type,estado,municipio,summary_public,confidence,severity,reported_at,evidence_json")
+        .order("reported_at", { ascending: false })
+        .limit(200);
 
-    if (error) { res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return; }
+      if (error) {
+        console.error("[risk-events] Supabase error:", error.message);
+        res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: error.message })); return;
+      }
 
-    const features = (data ?? []).map((e: any) => {
-      const layer = EVENT_TYPE_LAYER[e.event_type] ?? "desaparicion";
-      if (layerFilter && layer !== layerFilter) return null;
-      const estadoPrimary = (e.estado ?? "").split(",")[0].trim();
-      const municipioPrimary = (e.municipio ?? "").split(",")[0].trim();
-      const coords = coordFor(estadoPrimary, municipioPrimary);
-      if (!coords) return null;
-      const [lat, lng] = coords;
-      return {
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [lng, lat] },
-        properties: {
-          id: e.id, layer, event_type: e.event_type,
-          summary: e.summary_public, confidence: e.confidence,
-          severity: e.severity, estado: e.estado, municipio: e.municipio,
-          reported_at: e.reported_at,
-        },
-      };
-    }).filter(Boolean);
+      const features = (data ?? []).map((e: any) => {
+        const layer = EVENT_TYPE_LAYER[e.event_type] ?? "desaparicion";
+        if (layerFilter && layer !== layerFilter) return null;
+        const estadoPrimary = (e.estado ?? "").split(",")[0].trim();
+        const municipioPrimary = (e.municipio ?? "").split(",")[0].trim();
+        const coords = coordFor(estadoPrimary, municipioPrimary);
+        if (!coords) return null;
+        const [lat, lng] = coords;
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [lng, lat] },
+          properties: {
+            id: e.id, layer, event_type: e.event_type,
+            summary: e.summary_public, confidence: e.confidence,
+            severity: e.severity, estado: e.estado, municipio: e.municipio,
+            reported_at: e.reported_at,
+          },
+        };
+      }).filter(Boolean);
 
-    res.writeHead(200, jsonH());
-    res.end(JSON.stringify({ type: "FeatureCollection", total: features.length, features }));
+      res.writeHead(200, jsonH());
+      res.end(JSON.stringify({ type: "FeatureCollection", total: features.length, features }));
+    } catch (err: any) {
+      console.error("[risk-events] unhandled exception:", err?.message ?? err);
+      res.writeHead(500, jsonH()); res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
     return;
   }
 

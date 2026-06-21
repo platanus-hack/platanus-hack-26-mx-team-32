@@ -1,16 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, User, Shield, Bell } from 'lucide-react'
 import { GlassCard } from '../components/GlassCard'
 import { AgentDot } from '../components/AgentDot'
+import { createVinculo, searchPersonas } from '../features/profile/api'
+import { fullName, type PersonaSummary } from '../features/profile/types'
 
-const MOCK_PEOPLE = [
-  { id: 1, name: 'Jorge González', date: '12 mar 2023', initials: 'JG' },
-  { id: 2, name: 'Juan González Torres', date: '5 ene 2022', initials: 'JG' },
-  { id: 3, name: 'José González Ruiz', date: '20 ago 2021', initials: 'JG' },
-  { id: 4, name: 'Jorge Gutiérrez', date: '3 feb 2023', initials: 'JG' },
-  { id: 5, name: 'Javier González Mendoza', date: '11 nov 2022', initials: 'JG' },
-]
+function personaMeta(p: PersonaSummary): string {
+  return [p.sexo, p.edad_actual && `${p.edad_actual} años`, p.estado]
+    .filter(Boolean)
+    .join(' · ')
+}
 
 function StepDots({ current, total }: { current: number; total: number }) {
   return (
@@ -31,18 +31,49 @@ function StepDots({ current, total }: { current: number; total: number }) {
   )
 }
 
-function Step1({ onNext }: { onNext: () => void }) {
+function Step1({
+  onNext,
+  selected,
+  onSelect,
+}: {
+  onNext: () => void
+  selected: PersonaSummary | null
+  onSelect: (p: PersonaSummary | null) => void
+}) {
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<typeof MOCK_PEOPLE[0] | null>(null)
+  const [results, setResults] = useState<PersonaSummary[]>([])
+  const [loading, setLoading] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
-  const filtered = query.trim().length > 0
-    ? MOCK_PEOPLE.filter(p => p.name.toLowerCase().includes(query.toLowerCase()))
-    : []
+  // Debounced real search against the RNPDNO dataset (matches name + apellidos).
+  useEffect(() => {
+    const term = query.trim()
+    if (selected || term.length < 2) {
+      setResults([])
+      setLoading(false)
+      return
+    }
+    let active = true
+    setLoading(true)
+    const t = setTimeout(async () => {
+      try {
+        const res = await searchPersonas(term)
+        if (active) setResults(res.items)
+      } catch {
+        if (active) setResults([])
+      } finally {
+        if (active) setLoading(false)
+      }
+    }, 250)
+    return () => {
+      active = false
+      clearTimeout(t)
+    }
+  }, [query, selected])
 
-  function handleSelect(person: typeof MOCK_PEOPLE[0]) {
-    setSelected(person)
-    setQuery(person.name)
+  function handleSelect(person: PersonaSummary) {
+    onSelect(person)
+    setQuery(fullName(person))
     setDropdownOpen(false)
   }
 
@@ -70,7 +101,7 @@ function Step1({ onNext }: { onNext: () => void }) {
             type="text"
             className="glass-input"
             value={query}
-            onChange={e => { setQuery(e.target.value); setSelected(null); setDropdownOpen(true) }}
+            onChange={e => { setQuery(e.target.value); onSelect(null); setDropdownOpen(true) }}
             onFocus={() => setDropdownOpen(true)}
             onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
             onKeyDown={e => { if (e.key === 'Escape') setDropdownOpen(false) }}
@@ -80,7 +111,7 @@ function Step1({ onNext }: { onNext: () => void }) {
           <Search size={16} style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: '#6B6B6B', pointerEvents: 'none' }} />
         </div>
 
-        {filtered.length > 0 && !selected && dropdownOpen && (
+        {dropdownOpen && !selected && (loading || results.length > 0) && (
           <div
             style={{
               position: 'absolute',
@@ -98,7 +129,10 @@ function Step1({ onNext }: { onNext: () => void }) {
               boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
             }}
           >
-            {filtered.map(person => (
+            {loading && results.length === 0 && (
+              <div style={{ padding: '12px 14px', fontSize: 13, color: '#6B6B6B' }}>Buscando…</div>
+            )}
+            {results.map(person => (
               <button
                 key={person.id}
                 onClick={() => handleSelect(person)}
@@ -131,8 +165,8 @@ function Step1({ onNext }: { onNext: () => void }) {
                   <User size={18} color="#6B6B6B" />
                 </div>
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1A1A1A' }}>{person.name}</div>
-                  <div style={{ fontSize: 12, color: '#6B6B6B' }}>Desaparecido el {person.date}</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: '#1A1A1A' }}>{fullName(person)}</div>
+                  <div style={{ fontSize: 12, color: '#6B6B6B' }}>{personaMeta(person) || 'Persona desaparecida'}</div>
                 </div>
               </button>
             ))}
@@ -147,7 +181,12 @@ function Step1({ onNext }: { onNext: () => void }) {
         + Agregar
       </button>
 
-      <button className="btn-primary" style={{ width: '100%' }} onClick={onNext}>
+      <button
+        className="btn-primary"
+        style={{ width: '100%', opacity: selected ? 1 : 0.5 }}
+        onClick={onNext}
+        disabled={!selected}
+      >
         Siguiente
       </button>
     </div>
@@ -214,7 +253,15 @@ function Step2({ onNext }: { onNext: () => void }) {
   )
 }
 
-function Step3({ onFinish }: { onFinish: () => void }) {
+function Step3({
+  onFinish,
+  saving,
+  error,
+}: {
+  onFinish: () => void
+  saving: boolean
+  error: string | null
+}) {
   return (
     <div className="anim-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
       <div style={{
@@ -256,8 +303,17 @@ function Step3({ onFinish }: { onFinish: () => void }) {
         </div>
       </div>
 
-      <button className="btn-primary" style={{ width: '100%' }} onClick={onFinish}>
-        Comenzar búsqueda
+      {error && (
+        <p style={{ fontSize: 13, color: '#c0392b', marginBottom: 12, textAlign: 'center' }}>⚠ {error}</p>
+      )}
+
+      <button
+        className="btn-primary"
+        style={{ width: '100%', opacity: saving ? 0.7 : 1 }}
+        onClick={onFinish}
+        disabled={saving}
+      >
+        {saving ? 'Vinculando…' : 'Comenzar búsqueda'}
       </button>
     </div>
   )
@@ -266,9 +322,23 @@ function Step3({ onFinish }: { onFinish: () => void }) {
 export function Onboarding() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
+  const [selected, setSelected] = useState<PersonaSummary | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const TOTAL = 3
 
-  function finish() {
+  async function finish() {
+    setError(null)
+    if (selected?.id_victimadirecta) {
+      setSaving(true)
+      try {
+        await createVinculo(selected.id_victimadirecta)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo crear el vínculo')
+        setSaving(false)
+        return
+      }
+    }
     localStorage.setItem('onboarding_complete', '1')
     navigate('/home')
   }
@@ -299,9 +369,9 @@ export function Onboarding() {
       >
         <StepDots current={step} total={TOTAL} />
 
-        {step === 0 && <Step1 onNext={() => setStep(1)} />}
+        {step === 0 && <Step1 onNext={() => setStep(1)} selected={selected} onSelect={setSelected} />}
         {step === 1 && <Step2 onNext={() => setStep(2)} />}
-        {step === 2 && <Step3 onFinish={finish} />}
+        {step === 2 && <Step3 onFinish={finish} saving={saving} error={error} />}
       </GlassCard>
     </div>
   )

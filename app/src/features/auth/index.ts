@@ -1,2 +1,2 @@
-export { useSession, signInWithGoogle, signOut } from './useSession'
+export { useSession, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut } from './useSession'
 export { LoginCard } from './LoginCard'
