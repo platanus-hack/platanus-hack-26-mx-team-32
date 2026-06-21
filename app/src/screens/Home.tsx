@@ -457,14 +457,8 @@ function PersonDetailPanel({ person, detail }: { person: PanelPerson | null; det
 
 interface ChatMsg { id: number; from: 'me' | 'other'; text: string }
 
-const INITIAL_CHAT: ChatMsg[] = [
-  { id: 1, from: 'other', text: 'Hola, encontré estas pertenencias cerca del mercado de Zamora. ¿Coinciden con algo del caso que buscas?' },
-  { id: 2, from: 'me',    text: 'Sí, la mochila negra coincide con la descripción. ¿Podrías decirme exactamente dónde la encontraste?' },
-  { id: 3, from: 'other', text: 'Fue en la calle Morelos, a una cuadra del parque. Las dejé en resguardo con la Cruz Roja local.' },
-]
-
 function ChatSimModal({ onClose }: { onClose: () => void }) {
-  const [msgs, setMsgs] = useState<ChatMsg[]>(INITIAL_CHAT)
+  const [msgs, setMsgs] = useState<ChatMsg[]>([])
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -473,13 +467,6 @@ function ChatSimModal({ onClose }: { onClose: () => void }) {
     if (!text) return
     setMsgs(prev => [...prev, { id: Date.now(), from: 'me', text }])
     setInput('')
-    setTimeout(() => {
-      setMsgs(prev => [...prev, {
-        id: Date.now() + 1,
-        from: 'other',
-        text: 'Gracias por tu mensaje. Te responderé en cuanto pueda.',
-      }])
-    }, 1200)
   }
 
   useEffect(() => {
@@ -564,6 +551,9 @@ function EvidenceModal({ onClose }: { onClose: () => void }) {
     'Se encontraron pertenencias similares a las descritas en el caso: una mochila negra con correas naranjas, un morral color vino y una bolsa tipo duffle. Halladas en calle Morelos, col. Centro, Zamora, el 18 de junio de 2024. Actualmente en resguardo con Cruz Roja local.'
   )
   const [chatOpen, setChatOpen] = useState(false)
+  // Only render the photo block when an actual attachment exists; otherwise the
+  // broken <img> shows the alt text and looks worse than no photo at all.
+  const photoUrl: string | null = null
 
   return (
     <>
@@ -583,17 +573,21 @@ function EvidenceModal({ onClose }: { onClose: () => void }) {
           <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 18 }}>
             {/* Foto */}
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B', marginBottom: 8 }}>
-                Evidencia fotográfica
-              </label>
-              <img
-                src="/evidencia.jpg"
-                alt="Evidencia fotográfica"
-                style={{ width: '100%', borderRadius: 12, objectFit: 'cover', maxHeight: 280, display: 'block', border: '1px solid rgba(242,195,133,0.3)' }}
-              />
+              {photoUrl && (
+                <>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B', marginBottom: 8 }}>
+                    Evidencia fotográfica
+                  </label>
+                  <img
+                    src={photoUrl}
+                    alt="Evidencia fotográfica"
+                    style={{ width: '100%', borderRadius: 12, objectFit: 'cover', maxHeight: 280, display: 'block', border: '1px solid rgba(242,195,133,0.3)' }}
+                  />
+                </>
+              )}
 
               {/* Metadatos del hallazgo */}
-              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ marginTop: photoUrl ? 12 : 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
                   { icon: <MapPin size={14} color="#F2921D" />, label: 'Calle Morelos s/n, col. Centro, Zamora, Mich.' },
                   { icon: <Calendar size={14} color="#F2921D" />, label: '18 de junio de 2024' },
@@ -898,7 +892,20 @@ const NOTIFICATIONS = [
   },
 ]
 
-type Notif = { id: number | string; title: string; desc: string; time: string; isNew?: boolean }
+type Notif = { id: number | string; title: string; desc: string; time: string; isNew?: boolean; ts?: number }
+
+// Relative "time ago" in Spanish from an epoch-ms timestamp. Recomputed on each
+// render (the Home component ticks `now` every 30s) so cards age live.
+function timeAgo(ts: number, now: number): string {
+  const secs = Math.max(0, Math.floor((now - ts) / 1000))
+  if (secs < 60) return 'ahora'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `hace ${mins} min`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `hace ${hours} h`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'ayer' : `hace ${days} d`
+}
 
 // Score at/above which a candidate is worth notifying the user about.
 const NOTIFY_THRESHOLD = 0.6
@@ -937,6 +944,13 @@ export function Home() {
     return () => clearTimeout(t)
   }, [])
 
+  // Ticks every 30s so relative timestamps ("ahora" → "hace 1 min" → …) age live.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(i)
+  }, [])
+
   // A real match (score ≥ threshold) prepends a live card to "Notificaciones recientes".
   function addMatchNotif(c: PreviewCandidate) {
     setNotifs(prev => [
@@ -945,6 +959,7 @@ export function Home() {
         title: 'Nueva coincidencia detectada',
         desc: `Coincidencia ${c.tier} con ${c.nombre ?? 'un registro'} — ${(c.score * 100).toFixed(0)}% de similitud.`,
         time: 'ahora',
+        ts: Date.now(),
         isNew: true,
       },
       ...prev,
@@ -963,6 +978,7 @@ export function Home() {
         title: 'Nueva coincidencia detectada',
         desc: `Coincidencia ${p.tier ?? ''} con ${p.nombre ?? 'un registro'} — ${Math.round((p.score ?? 0) * 100)}% de similitud.`,
         time: 'ahora',
+        ts: new Date(n.created_at).getTime(),
         isNew: true,
       }
     })
@@ -1211,7 +1227,7 @@ export function Home() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{n.time}</span>
+                        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{n.ts != null ? timeAgo(n.ts, now) : n.time}</span>
                         <button
                           className="btn-ghost"
                           style={{ padding: '5px 14px', fontSize: 12, color: 'var(--color-primary)' }}
