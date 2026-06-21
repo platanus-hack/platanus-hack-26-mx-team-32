@@ -143,7 +143,8 @@ Respond as STRICT JSON only (no markdown fences), exactly this shape:
       upfront_fee: parsed.upfront_fee ?? null,
       contact_method: parsed.contact_method ?? null,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`extractJobPatternWithClaudeJob failed: ${err instanceof Error ? err.message : "unknown"}`);
     return {
       tone_description: null,
       tone_keywords: [],
@@ -560,7 +561,7 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
   // Step 1: parallel Claude extractions (8 at a time — stays under rate limit)
   const extractions = await parallelBatch(posts, 8, async (post, i) => {
     try {
-      const result = await extractJobPatternWithClaudeJob(post);
+      const result = await extractPatternWithClaude(post);
       if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
         console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
       }
@@ -607,7 +608,7 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
       id: randomUUID(),
       post_url: post.url,
       post_content: post.content,
-      tone_description: buildJobToneDescription(extraction),
+      tone_description: extraction.tone_description,
       tone_keywords: extraction.tone_keywords,
       image_urls: [] as string[],
       image_descriptions: extraction.image_descriptions,
@@ -733,25 +734,11 @@ export async function scrapeAndSeedFakeJobPatterns(): Promise<ScrapeSummary> {
 
   console.log(`\nExtracting job patterns from ${posts.length} posts (8 concurrent Claude calls)...`);
   const extractions = await parallelBatch(posts, 8, async (post, i) => {
-    try {
-      const result = await extractJobPatternWithClaudeJob(post);
-      if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
-        console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
-      }
-      return result;
-    } catch {
-      return {
-        tone_description: null,
-        tone_keywords: [],
-        image_descriptions: [],
-        location_text: null,
-        job_title: null,
-        company_name: null,
-        salary_mentioned: null,
-        upfront_fee: null,
-        contact_method: null,
-      };
+    const result = await extractJobPatternWithClaudeJob(post);
+    if ((i + 1) % 10 === 0 || i + 1 === posts.length) {
+      console.log(`  Claude extraction: ${i + 1}/${posts.length}`);
     }
+    return result;
   });
 
   const uniqueTexts = [...new Set(
