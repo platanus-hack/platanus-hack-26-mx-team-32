@@ -36,6 +36,28 @@ export function filterJobPosts(posts: ScrapedPost[]): ScrapedPost[] {
   });
 }
 
+interface JobPatternExtraction {
+  tone_description: string | null;
+  tone_keywords: string[];
+  image_descriptions: string[];
+  location_text: string | null;
+  job_title: string | null;
+  company_name: string | null;
+  salary_mentioned: string | null;
+  upfront_fee: string | null;
+  contact_method: string | null;
+}
+
+export function buildJobToneDescription(e: JobPatternExtraction): string | null {
+  const parts: string[] = [];
+  if (e.job_title) parts.push(e.job_title);
+  if (e.company_name) parts.push(`@ ${e.company_name}`);
+  if (e.upfront_fee) parts.push(`— ${e.upfront_fee} fee`);
+  const prefix = parts.length > 0 ? `[${parts.join(" ")}] ` : "";
+  if (!prefix && !e.tone_description) return null;
+  return `${prefix}${e.tone_description ?? ""}`.trim() || null;
+}
+
 interface ClaudePatternExtraction {
   tone_description: string | null;
   tone_keywords: string[];

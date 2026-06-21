@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterJobPosts, JOB_KEYWORDS } from "./facebook-scraper.js";
+import { filterJobPosts, JOB_KEYWORDS, buildJobToneDescription } from "./facebook-scraper.js";
 import type { ScrapedPost } from "./facebook-scraper.js";
 
 function makePost(content: string): ScrapedPost {
@@ -42,5 +42,67 @@ describe("filterJobPosts", () => {
     expect(kws).toContain("vacante");
     expect(kws).toContain("uniforme");
     expect(kws).toContain("depósito");
+  });
+});
+
+describe("buildJobToneDescription", () => {
+  it("returns full structured prefix when all fields present", () => {
+    const result = buildJobToneDescription({
+      tone_description: "WhatsApp recruitment scam",
+      tone_keywords: ["job_offer", "uniform_fee"],
+      image_descriptions: [],
+      location_text: "Colonia Roma Norte",
+      job_title: "Delivery driver",
+      company_name: "Empresa XYZ",
+      salary_mentioned: "$500/día",
+      upfront_fee: "$300 MXN uniforme",
+      contact_method: "WhatsApp 5512345678",
+    });
+    expect(result).toBe("[Delivery driver @ Empresa XYZ — $300 MXN uniforme fee] WhatsApp recruitment scam");
+  });
+
+  it("omits prefix parts that are null", () => {
+    const result = buildJobToneDescription({
+      tone_description: "Fake job via WhatsApp",
+      tone_keywords: [],
+      image_descriptions: [],
+      location_text: null,
+      job_title: "Promotor",
+      company_name: null,
+      salary_mentioned: null,
+      upfront_fee: null,
+      contact_method: null,
+    });
+    expect(result).toBe("[Promotor] Fake job via WhatsApp");
+  });
+
+  it("returns tone_description only when no prefix fields are set", () => {
+    const result = buildJobToneDescription({
+      tone_description: "Generic recruitment scam",
+      tone_keywords: [],
+      image_descriptions: [],
+      location_text: null,
+      job_title: null,
+      company_name: null,
+      salary_mentioned: null,
+      upfront_fee: null,
+      contact_method: null,
+    });
+    expect(result).toBe("Generic recruitment scam");
+  });
+
+  it("returns null when tone_description is null and no prefix fields", () => {
+    const result = buildJobToneDescription({
+      tone_description: null,
+      tone_keywords: [],
+      image_descriptions: [],
+      location_text: null,
+      job_title: null,
+      company_name: null,
+      salary_mentioned: null,
+      upfront_fee: null,
+      contact_method: null,
+    });
+    expect(result).toBeNull();
   });
 });
