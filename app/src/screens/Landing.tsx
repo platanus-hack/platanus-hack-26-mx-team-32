@@ -518,6 +518,79 @@ export function Landing() {
         )}
       </div>
 
+      {/* Desaparecidos esta semana */}
+      <div className="glass" style={{
+        position: 'absolute',
+        top: 218,
+        left: 16,
+        zIndex: 20,
+        width: 244,
+        maxWidth: 'calc(100vw - 32px)',
+        borderRadius: 16,
+        padding: '14px 14px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: 'calc(100vh - 360px)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <img
+            src="/person_icon.png"
+            alt=""
+            style={{ width: 22, height: 22, flexShrink: 0, objectFit: 'contain' }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--color-text-secondary)', flex: 1 }}>
+            Desaparecidos esta semana
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>
+            {weekPersons.length}
+          </span>
+        </div>
+
+        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 2 }}>
+          {loading ? (
+            <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>Cargando…</div>
+          ) : weekPersons.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>Sin registros recientes.</div>
+          ) : (
+            weekPersons.map(p => (
+              <button
+                key={p.id}
+                onClick={() => handleSelect(p)}
+                style={{
+                  textAlign: 'left',
+                  border: 'none',
+                  borderLeft: '3px solid var(--color-primary)',
+                  borderRadius: '0 10px 10px 0',
+                  padding: '8px 10px 8px 11px',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-family)',
+                  transition: 'background 0.15s, border-color 0.15s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(242,146,29,0.10)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <WeekPhoto person={p} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', lineHeight: 1.3, marginBottom: 2 }}>
+                  {fullName(p)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.45 }}>
+                  {ageText(p)} · {locationText(p)}
+                </div>
+                <div style={{ fontSize: 10, color: '#dc2626', fontWeight: 500, marginTop: 2 }}>
+                  {formatDate(p.fecha_hechos)}
+                </div>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
       {/* Legend */}
       <div className="glass" style={{
         position: 'absolute',

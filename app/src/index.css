@@ -243,6 +243,35 @@
   animation: fadeIn 0.35s ease-out forwards;
 }
 
+/* Skeleton shimmer for loading states */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(242, 195, 133, 0.18) 0%,
+    rgba(242, 195, 133, 0.32) 50%,
+    rgba(242, 195, 133, 0.18) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(242, 146, 29, 0.10) 0%,
+    rgba(242, 146, 29, 0.22) 50%,
+    rgba(242, 146, 29, 0.10) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
 .gm-style .gm-style-iw-tc,
 .gm-style .gm-style-iw-tc::after,
 .gm-style-iw-c button[aria-label="Close"] {

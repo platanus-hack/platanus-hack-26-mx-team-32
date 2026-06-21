@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UserCircle, MessageCircle, X, Send, MapPin, Calendar, Clock, Plus, Image, LogOut } from 'lucide-react'
+import { UserCircle, MessageCircle, X, Send, MapPin, Calendar, Clock, Plus, Image, LogOut, Loader2 } from 'lucide-react'
 import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, Circle, MarkerClustererF } from '@react-google-maps/api'
 import { GlassCard } from '../components/GlassCard'
 import { AgentDot } from '../components/AgentDot'
@@ -68,20 +68,20 @@ const STATIC_MARKERS: StaticMarker[] = [
 ]
 
 function dotIcon(color: string) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="${color}" opacity="0.9" stroke="white" stroke-width="1.5"/></svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="${color}" opacity="0.95" stroke="white" stroke-width="2.2"/></svg>`
   return {
-    url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(14, 14),
-    anchor: new google.maps.Point(7, 7),
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(22, 22),
+    anchor: new google.maps.Point(11, 11),
   }
 }
 
 function personDotIcon() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#EF4444" opacity="0.9" stroke="white" stroke-width="1"/></svg>`
   return {
-    url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(12, 12),
-    anchor: new google.maps.Point(6, 6),
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(20, 20),
+    anchor: new google.maps.Point(10, 10),
   }
 }
 
@@ -649,6 +649,15 @@ export function Home() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [notifs, setNotifs] = useState<Notif[]>(NOTIFICATIONS)
 
+  // Emulates the AI agent doing initial research on mount so the
+  // "Notificaciones" and "Análisis del agente IA" panels show shimmering
+  // skeletons for a moment before the content reveals.
+  const [loadingContent, setLoadingContent] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setLoadingContent(false), 1700)
+    return () => clearTimeout(t)
+  }, [])
+
   // A real match (score ≥ threshold) prepends a live card to "Notificaciones recientes".
   function addMatchNotif(c: PreviewCandidate) {
     setNotifs(prev => [
@@ -703,6 +712,7 @@ export function Home() {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
+        overflowX: 'hidden',
       }}
     >
       {/* Navbar */}
@@ -857,40 +867,58 @@ export function Home() {
               Buscar coincidencias
             </button>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {allNotifs.map(n => (
-                <div
-                  key={n.id}
-                  className={n.isNew ? 'glass anim-fade-in' : 'glass'}
-                  style={{
-                    padding: '14px 18px',
-                    borderLeft: '3px solid #F2921D',
-                    borderRadius: '0 16px 16px 0',
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1A1A1A', marginBottom: 2 }}>
-                      {n.title}
-                    </div>
-                    <div style={{ fontSize: 13, color: '#6B6B6B', lineHeight: 1.55 }}>
-                      {n.desc}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                    <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{n.time}</span>
-                    <button
-                      className="btn-ghost"
-                      style={{ padding: '5px 14px', fontSize: 12, color: 'var(--color-primary)' }}
-                      onClick={() => setEvidenceOpen(true)}
+              {loadingContent
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <div
+                      key={`skel-${i}`}
+                      style={{
+                        padding: '14px 18px',
+                        borderLeft: '3px solid #F2921D',
+                        borderRadius: '0 16px 16px 0',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                      }}
                     >
-                      Ver detalle →
-                    </button>
-                  </div>
-                </div>
-              ))}
+                      <div className="skeleton" style={{ height: 12, width: '60%' }} />
+                      <div className="skeleton" style={{ height: 10, width: '92%' }} />
+                      <div className="skeleton" style={{ height: 10, width: '78%' }} />
+                    </div>
+                  ))
+                : allNotifs.map(n => (
+                    <div
+                      key={n.id}
+                      className={n.isNew ? 'glass anim-fade-in' : 'glass'}
+                      style={{
+                        padding: '14px 18px',
+                        borderLeft: '3px solid #F2921D',
+                        borderRadius: '0 16px 16px 0',
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 2 }}>
+                          {n.title}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.55 }}>
+                          {n.desc}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{n.time}</span>
+                        <button
+                          className="btn-ghost"
+                          style={{ padding: '5px 14px', fontSize: 12, color: 'var(--color-primary)' }}
+                          onClick={() => setEvidenceOpen(true)}
+                        >
+                          Ver detalle →
+                        </button>
+                      </div>
+                    </div>
+                  ))}
             </div>
           </div>
 
-          <div style={{ flex: 1, minWidth: 260, position: 'relative' }}>
+          <div style={{ flex: 1, minWidth: 260, position: 'relative', overflow: 'hidden' }}>
             <div
               className="absolute pointer-events-none"
               style={{
@@ -917,29 +945,48 @@ export function Home() {
                 </span>
               </div>
 
-              <div style={{ padding: '18px 22px', background: 'rgba(242,227,213,0.22)' }}>
-                <p style={{ fontSize: 14, color: '#1A1A1A', lineHeight: 1.70, marginBottom: 18, textWrap: 'pretty' as 'pretty' }}>
-                  Con base en los 12 reportes cruzados esta semana, la zona noreste del estado de Michoacán — particularmente los municipios de Zamora y Jacona — muestra la mayor concentración de coincidencias. Se han identificado 3 posibles fosas en un radio de 8 km y 2 puntos de desaparición reportados en los últimos 30 días con características similares al perfil registrado.
-                </p>
+              <div style={{ padding: '18px 22px', background: 'var(--surface-card)' }}>
+                {loadingContent ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div className="skeleton" style={{ height: 12, width: '95%' }} />
+                    <div className="skeleton" style={{ height: 12, width: '88%' }} />
+                    <div className="skeleton" style={{ height: 12, width: '92%' }} />
+                    <div className="skeleton" style={{ height: 12, width: '70%' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                      <div className="skeleton" style={{ height: 7, flex: 1 }} />
+                      <div className="skeleton" style={{ height: 11, width: 36 }} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                      <Loader2 size={12} className="anim-breath" color="var(--color-primary)" />
+                      <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>Analizando reportes cruzados…</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 14, color: 'var(--color-text-primary)', lineHeight: 1.70, marginBottom: 18, textWrap: 'pretty' as const }}>
+                      Con base en los 12 reportes cruzados esta semana, la zona noreste del estado de Michoacán — particularmente los municipios de Zamora y Jacona — muestra la mayor concentración de coincidencias. Se han identificado 3 posibles fosas en un radio de 8 km y 2 puntos de desaparición reportados en los últimos 30 días con características similares al perfil registrado.
+                    </p>
 
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: '#6B6B6B' }}>Nivel de confianza del análisis</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#F2921D' }}>78%</span>
-                  </div>
-                  <div style={{ height: 7, borderRadius: 40, background: 'rgba(242,195,133,0.30)', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        height: '100%',
-                        width: '78%',
-                        background: 'linear-gradient(90deg, #F2C185, #F2921D)',
-                        borderRadius: 40,
-                        animation: 'confFill 1.3s ease-out forwards',
-                        ['--conf-width' as string]: '78%',
-                      }}
-                    />
-                  </div>
-                </div>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>Nivel de confianza del análisis</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-primary)' }}>78%</span>
+                      </div>
+                      <div style={{ height: 7, borderRadius: 40, background: 'rgba(242,195,133,0.30)', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            height: '100%',
+                            width: '78%',
+                            background: 'linear-gradient(90deg, #F2C185, #F2921D)',
+                            borderRadius: 40,
+                            animation: 'confFill 1.3s ease-out forwards',
+                            ['--conf-width' as string]: '78%',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{
