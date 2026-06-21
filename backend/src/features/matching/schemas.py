@@ -46,3 +46,11 @@ class PreviewResult(BaseModel):
     retrieved: int
     via: str  # "vector" | "brute"
     candidatos: list[PreviewCandidate]
+
+
+class NotifyMatchIn(BaseModel):
+    """Reporter found a strong match for a persona → notify families linked to it."""
+    persona_victima_id: str
+    nombre: str | None = None
+    score: float
+    tier: str

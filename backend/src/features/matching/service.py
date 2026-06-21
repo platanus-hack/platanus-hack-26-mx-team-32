@@ -1,4 +1,6 @@
 """Match service — reads stored candidatos and runs the live preview funnel."""
+import json
+
 from psycopg.rows import dict_row
 
 from src.config import settings
@@ -107,6 +109,29 @@ def _senas_text(senas) -> str | None:
     if isinstance(senas, list):
         return "<br>".join(str(s) for s in senas)
     return senas
+
+
+def notify_linked_of_match(
+    conn, persona_victima_id: str, nombre: str | None, score: float, tier: str, exclude_user_id: str
+) -> int:
+    """Insert a 'match' notification for every family linked to this persona
+    (except the reporter). Returns how many were notified."""
+    payload = json.dumps(
+        {"persona_victima_id": persona_victima_id, "nombre": nombre, "score": score, "tier": tier}
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into notificaciones (usuario_id, tipo, payload)
+            select v.usuario_id, 'match', %s::jsonb
+            from vinculos v
+            where v.persona_victima_id = %s and v.usuario_id <> %s
+            """,
+            (payload, persona_victima_id, exclude_user_id),
+        )
+        n = cur.rowcount
+    conn.commit()
+    return n
 
 
 def preview_match(conn, query: dict, k_retrieve: int | None = None, top_n: int | None = None) -> tuple[int, str, list[dict]]:
