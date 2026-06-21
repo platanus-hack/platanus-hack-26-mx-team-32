@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { UserCircle, MessageCircle, X, Send, MapPin, Calendar, Clock, Plus, Image, LogOut, Loader2 } from 'lucide-react'
-import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, Circle, MarkerClustererF } from '@react-google-maps/api'
+import { MessageCircle, X, Send, MapPin, Calendar, Clock, Plus, Image, User, Loader2 } from 'lucide-react'
+import { GoogleMap, useJsApiLoader, MarkerF, InfoWindowF, Circle } from '@react-google-maps/api'
+import { MarkerClusterer, GridAlgorithm } from '@googlemaps/markerclusterer'
 import { GlassCard } from '../components/GlassCard'
-import { AgentDot } from '../components/AgentDot'
+import { AppHeader } from '../components/AppHeader'
 import { ChatDrawer } from '../components/ChatDrawer'
+import { NewsAnalysisWidget } from '../components/NewsAnalysisWidget'
+import { useTheme } from '../features/theme'
 import { getMyVinculo } from '../features/profile/api'
-import { fullName, type VinculoOut } from '../features/profile/types'
-import { fetchPersonsOnMap, type PersonOnMap } from '../features/landing/api'
+import { fullName, type PersonaSummary, type VinculoOut } from '../features/profile/types'
+import { fetchPersonDetail, fetchPersonsOnMap, parseFiliacion, parseSenas, type PersonDetail, type PersonOnMap } from '../features/landing/api'
+import { addMexicoBorders } from '../lib/mexico-borders'
 import { matchPreview, notifyMatch } from '../features/matching/api'
 import type { PreviewCandidate } from '../features/matching/types'
 import { useNotifications } from '../features/notifications'
@@ -18,7 +21,7 @@ const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' }
 const MAP_CENTER = { lat: 19.5665, lng: -101.7068 }
 const MAP_ZOOM = 8
 
-const MAP_STYLE: google.maps.MapTypeStyle[] = [
+const MAP_STYLE_LIGHT: google.maps.MapTypeStyle[] = [
   { featureType: 'all', elementType: 'labels.text', stylers: [{ color: '#878787' }] },
   { featureType: 'all', elementType: 'labels.text.stroke', stylers: [{ visibility: 'off' }] },
   { featureType: 'landscape', elementType: 'all', stylers: [{ color: '#f9f5ed' }] },
@@ -27,9 +30,29 @@ const MAP_STYLE: google.maps.MapTypeStyle[] = [
   { featureType: 'water', elementType: 'all', stylers: [{ color: '#aee0f4' }] },
 ]
 
-const CLUSTER_ICON_URL = 'data:image/svg+xml,' + encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="rgba(220,38,38,0.5)"/></svg>`
-)
+const MAP_STYLE_DARK: google.maps.MapTypeStyle[] = [
+  { elementType: 'geometry', stylers: [{ color: '#212121' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#212121' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#757575' }] },
+  { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
+  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
+  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#bdbdbd' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#181818' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.stroke', stylers: [{ color: '#1b1b1b' }] },
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#2c2c2c' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#8a8a8a' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#373737' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3c3c3c' }] },
+  { featureType: 'road.highway.controlled_access', elementType: 'geometry', stylers: [{ color: '#4e4e4e' }] },
+  { featureType: 'road.local', elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+  { featureType: 'transit', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#000000' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#3d3d3d' }] },
+]
 
 type FilterKey = 'fosas' | 'desaparicion' | 'trabajos'
 
@@ -85,31 +108,116 @@ function personDotIcon() {
   }
 }
 
+// Big "Lugar de desaparición" callout: a labelled box on top, a vertical
+// stick pointing down, and a small dot at the actual map location.
+function bigPinIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="100" viewBox="0 0 260 100">
+    <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.30"/></filter></defs>
+    <g filter="url(#sh)">
+      <rect x="45" y="8" width="170" height="30" rx="15" fill="#DC2626"/>
+      <text x="130" y="28" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="system-ui, -apple-system, sans-serif">Lugar de desaparición</text>
+      <line x1="130" y1="38" x2="130" y2="86" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="130" cy="88" r="5" fill="#DC2626" stroke="#fff" stroke-width="2"/>
+    </g>
+  </svg>`
+  return {
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(260, 100),
+    anchor: new google.maps.Point(130, 88),
+  }
+}
+
 interface MapProps {
   staticMarkers: StaticMarker[]
   persons: PersonOnMap[]
   showPersons: boolean
   filters: Record<FilterKey, boolean>
+  selectedCoords: { lat: number; lng: number } | null
+  theme: 'light' | 'dark'
 }
 
-function Map({ staticMarkers, persons, showPersons, filters }: MapProps) {
+function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, theme }: MapProps) {
   const [selectedStatic, setSelectedStatic] = useState<StaticMarker | null>(null)
+  const [mapReady, setMapReady] = useState(false)
+  const mapRef = useRef<google.maps.Map | null>(null)
+  const markersRef = useRef<google.maps.Marker[]>([])
+  const clustererRef = useRef<MarkerClusterer | null>(null)
   const personIcon = useMemo(() => personDotIcon(), [])
+  const pinIcon = useMemo(() => bigPinIcon(), [])
 
   const fosaMarkers = staticMarkers.filter(m => m.type === 'fosas' && filters.fosas)
   const trabajosMarkers = staticMarkers.filter(m => m.type === 'trabajos' && filters.trabajos)
+
+  // Imperative clustering + Mexico borders.
+  useEffect(() => {
+    if (!mapReady) return
+
+    if (!showPersons || persons.length === 0) {
+      markersRef.current.forEach(m => { google.maps.event.clearInstanceListeners(m); m.setMap(null) })
+      markersRef.current = []
+      clustererRef.current?.setMap(null)
+      clustererRef.current = null
+      return
+    }
+
+    const map = mapRef.current
+    if (!map) return
+
+    const markers = persons.map(p => {
+      const marker = new google.maps.Marker({
+        position: { lat: p.lat, lng: p.lng },
+        map,
+        icon: personIcon,
+      })
+      return marker
+    })
+    markersRef.current = markers
+
+    const clusterer = new MarkerClusterer({
+      markers,
+      map,
+      algorithm: new GridAlgorithm({ gridSize: 10, maxZoom: 18 }),
+    })
+    clustererRef.current = clusterer
+
+    return () => {
+      markers.forEach(m => { google.maps.event.clearInstanceListeners(m); m.setMap(null) })
+      clusterer.setMap(null)
+      markersRef.current = []
+      clustererRef.current = null
+    }
+  }, [mapReady, persons, showPersons, personIcon])
+
+  // Recenter on the selected person's disappearance location.
+  useEffect(() => {
+    if (mapReady && selectedCoords && mapRef.current) {
+      mapRef.current.panTo(selectedCoords)
+      if ((mapRef.current.getZoom() ?? 0) < 11) mapRef.current.setZoom(11)
+    }
+  }, [mapReady, selectedCoords])
+
+  // Thick Mexico state borders, re-styled when the theme flips.
+  useEffect(() => {
+    if (mapReady && mapRef.current) {
+      addMexicoBorders(mapRef.current, theme)
+    }
+  }, [mapReady, theme])
 
   return (
     <GoogleMap
       mapContainerStyle={MAP_CONTAINER_STYLE}
       center={MAP_CENTER}
       zoom={MAP_ZOOM}
+      onLoad={map => { mapRef.current = map; setMapReady(true) }}
       options={{
-        styles: MAP_STYLE,
+        styles: theme === 'dark' ? MAP_STYLE_DARK : MAP_STYLE_LIGHT,
         fullscreenControl: false,
         mapTypeControl: false,
         streetViewControl: false,
-        zoomControl: true,
+        zoomControl: false,
+        rotateControl: false,
+        scaleControl: false,
+        panControl: false,
       }}
       onClick={() => setSelectedStatic(null)}
     >
@@ -139,6 +247,10 @@ function Map({ staticMarkers, persons, showPersons, filters }: MapProps) {
         />
       ))}
 
+      {selectedCoords && (
+        <MarkerF position={selectedCoords} icon={pinIcon} zIndex={200} />
+      )}
+
       {selectedStatic && (
         <InfoWindowF
           position={{ lat: selectedStatic.lat, lng: selectedStatic.lng }}
@@ -151,37 +263,193 @@ function Map({ staticMarkers, persons, showPersons, filters }: MapProps) {
           </div>
         </InfoWindowF>
       )}
-
-      {showPersons && persons.length > 0 && (
-        <MarkerClustererF
-          options={{
-            maxZoom: 14,
-            gridSize: 10,
-            minimumClusterSize: 5,
-            styles: [{
-              textColor: '#fff',
-              textSize: 13,
-              url: CLUSTER_ICON_URL,
-              height: 44,
-              width: 44,
-            }],
-          }}
-        >
-          {(clusterer) => (
-            <>
-              {persons.map(p => (
-                <MarkerF
-                  key={p.id}
-                  clusterer={clusterer}
-                  position={{ lat: p.lat, lng: p.lng }}
-                  icon={personIcon}
-                />
-              ))}
-            </>
-          )}
-        </MarkerClustererF>
-      )}
     </GoogleMap>
+  )
+}
+
+// ── Panel: datos detallados de la persona seleccionada ──────────────────────────
+
+interface PanelPerson {
+  nombre: string | null
+  primer_apellido: string | null
+  segundo_apellido: string | null
+  edad_actual: number | null
+  edad_hechos: number | null
+  estado: string | null
+  municipio: string | null
+  fecha_hechos: string | null
+  estatus_victima: string | null
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return 'Fecha no registrada'
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return 'Fecha no registrada'
+  return dt.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function fixDataUri(raw: string | null): string | null {
+  if (!raw) return null
+  const comma = raw.indexOf(',')
+  if (comma < 0) return null
+  const b64 = raw.slice(comma + 1).replace(/\s/g, '')
+  if (!b64) return null
+  const mime = b64.startsWith('/9j/') ? 'image/jpeg' : b64.startsWith('iVBOR') ? 'image/png' : 'image/jpeg'
+  return `data:${mime};base64,${b64}`
+}
+
+const panelItem: React.CSSProperties = { fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.55 }
+
+function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--divider)' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-primary)', marginBottom: 5 }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function PersonDetailPanel({ person, detail }: { person: PanelPerson | null; detail: PersonDetail | null }) {
+  if (!person) {
+    return (
+      <div
+        className="anim-fade-in"
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          bottom: 12,
+          width: 320,
+          maxWidth: 'calc(100% - 24px)',
+          zIndex: 5,
+          borderRadius: 16,
+          padding: 24,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          gap: 10,
+          background: 'var(--color-bg)',
+          border: '1px solid var(--surface-card-border)',
+        }}
+      >
+        <User size={28} color="var(--color-primary)" />
+        <span style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+          No se ha seleccionado ninguna persona.<br />Completa el onboarding para ver su información.
+        </span>
+      </div>
+    )
+  }
+
+  const name = fullName(person)
+  const age = person.edad_actual ?? person.edad_hechos
+  const loc = [person.municipio, person.estado].filter(Boolean).join(', ') || 'Ubicación no registrada'
+  const photo = detail ? fixDataUri(detail.imagen) : null
+  const senas = detail ? parseSenas(detail.sana_particular) : []
+  const filiacion = detail ? parseFiliacion(detail.media_filiacion) : {}
+
+  return (
+    <div
+      className="anim-fade-in"
+      style={{
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        bottom: 12,
+        width: 320,
+        maxWidth: 'calc(100% - 24px)',
+        zIndex: 5,
+        borderRadius: 16,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--surface-card-border)',
+      }}
+    >
+      {photo ? (
+        <img
+          src={photo}
+          alt={name}
+          style={{ width: '100%', height: 260, objectFit: 'cover', borderRadius: '16px 16px 0 0', background: 'var(--color-photo-bg)' }}
+        />
+      ) : (
+        <div style={{ width: '100%', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--glass-bg)', borderRadius: '16px 16px 0 0' }}>
+          <User size={40} color="var(--color-primary)" />
+        </div>
+      )}
+
+      <div style={{ padding: '16px 18px', flex: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)', lineHeight: 1.3, marginBottom: 6 }}>{name}</div>
+
+        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 2 }}>
+          {age ? `${age} años` : 'Edad no registrada'}{detail?.sexo ? ` · ${detail.sexo}` : ''}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 2 }}>{loc}</div>
+        <div style={{ fontSize: 12, color: 'var(--color-primary)', fontWeight: 600, marginBottom: 8 }}>
+          Desaparecida {fmtDate(person.fecha_hechos)}
+        </div>
+
+        <span style={{
+          display: 'inline-block',
+          padding: '3px 10px',
+          borderRadius: 40,
+          background: 'rgba(220,38,38,0.10)',
+          border: '1px solid rgba(220,38,38,0.3)',
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          color: '#DC2626',
+          marginBottom: 4,
+        }}>
+          {person.estatus_victima ?? 'Estatus no registrado'}
+        </span>
+
+        {!detail && (
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 8 }}>Cargando detalles…</div>
+        )}
+
+        {detail && (
+          <>
+            {senas.length > 0 && (
+              <PanelSection title="Señas particulares">
+                {senas.map((s, i) => <div key={i} style={panelItem}>· {s}</div>)}
+              </PanelSection>
+            )}
+
+            {detail.prendas_de_vestir && (
+              <PanelSection title="Vestimenta">
+                <div style={panelItem}>{detail.prendas_de_vestir.replace(/<br\s*\/?>/gi, ', ')}</div>
+              </PanelSection>
+            )}
+
+            {Object.keys(filiacion).length > 0 && (
+              <PanelSection title="Media filiación">
+                {Object.entries(filiacion).map(([k, v], i) => (
+                  <div key={i} style={panelItem}><b style={{ fontWeight: 500 }}>{k}:</b> {v}</div>
+                ))}
+              </PanelSection>
+            )}
+
+            {detail.nacionalidad && (
+              <PanelSection title="Nacionalidad">
+                <div style={panelItem}>{detail.nacionalidad}</div>
+              </PanelSection>
+            )}
+
+            {detail.tiene_discapacidad && detail.tipo_discapacidad && (
+              <PanelSection title="Discapacidad">
+                <div style={panelItem}>{detail.tipo_discapacidad}</div>
+              </PanelSection>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -635,8 +903,18 @@ type Notif = { id: number | string; title: string; desc: string; time: string; i
 // Score at/above which a candidate is worth notifying the user about.
 const NOTIFY_THRESHOLD = 0.7
 
+function readStoredPersona(): PersonaSummary | null {
+  try {
+    const raw = localStorage.getItem('selected_persona')
+    if (!raw) return null
+    return JSON.parse(raw) as PersonaSummary
+  } catch {
+    return null
+  }
+}
+
 export function Home() {
-  const navigate = useNavigate()
+  const { theme } = useTheme()
   const [filters, setFilters] = useState<Record<FilterKey, boolean>>({
     fosas: true,
     desaparicion: true,
@@ -645,6 +923,7 @@ export function Home() {
   const [vinculo, setVinculo] = useState<VinculoOut | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [persons, setPersons] = useState<PersonOnMap[]>([])
+  const [detail, setDetail] = useState<PersonDetail | null>(null)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [notifs, setNotifs] = useState<Notif[]>(NOTIFICATIONS)
@@ -689,6 +968,72 @@ export function Home() {
     })
   const allNotifs: Notif[] = [...liveMatchNotifs, ...notifs]
 
+  // The single selected person — from the backend vinculo, or the onboarding
+  // selection persisted to localStorage as a fallback.
+  const selectedId = useMemo<number | null>(() => {
+    if (vinculo?.persona?.id != null) return vinculo.persona.id
+    return readStoredPersona()?.id ?? null
+  }, [vinculo])
+
+  const selectedPersonOnMap = useMemo(
+    () => persons.find(p => p.id === selectedId) ?? null,
+    [persons, selectedId]
+  )
+
+  const selectedCoords = useMemo(
+    () => (selectedPersonOnMap ? { lat: selectedPersonOnMap.lat, lng: selectedPersonOnMap.lng } : null),
+    [selectedPersonOnMap]
+  )
+
+  // Background desaparición dots — everyone except the selected person (who gets
+  // the big pin) so they aren't double-marked.
+  const backgroundPersons = useMemo(
+    () => persons.filter(p => p.id !== selectedId),
+    [persons, selectedId]
+  )
+
+  // Normalize the panel data from whichever source we have.
+  const panelPerson = useMemo<PanelPerson | null>(() => {
+    if (selectedPersonOnMap) {
+      const p = selectedPersonOnMap
+      return {
+        nombre: p.nombre, primer_apellido: p.primer_apellido, segundo_apellido: p.segundo_apellido,
+        edad_actual: p.edad_actual, edad_hechos: p.edad_hechos,
+        estado: p.estado, municipio: p.municipio,
+        fecha_hechos: p.fecha_hechos, estatus_victima: p.estatus_victima,
+      }
+    }
+    const vp = vinculo?.persona
+    if (vp) {
+      return {
+        nombre: vp.nombre, primer_apellido: vp.primer_apellido, segundo_apellido: vp.segundo_apellido,
+        edad_actual: vp.edad_actual ? Number(vp.edad_actual) || null : null, edad_hechos: null,
+        estado: vp.estado, municipio: vp.municipio,
+        fecha_hechos: vp.fecha_hechos, estatus_victima: vp.estatus_victima,
+      }
+    }
+    const sp = readStoredPersona()
+    if (sp) {
+      return {
+        nombre: sp.nombre, primer_apellido: sp.primer_apellido, segundo_apellido: sp.segundo_apellido,
+        edad_actual: sp.edad_actual ? Number(sp.edad_actual) || null : null, edad_hechos: null,
+        estado: sp.estado, municipio: sp.municipio,
+        fecha_hechos: null, estatus_victima: sp.estatus_victima,
+      }
+    }
+    return null
+  }, [selectedPersonOnMap, vinculo])
+
+  // Fetch the full detail for the selected person (public Supabase read).
+  useEffect(() => {
+    if (selectedId == null) return
+    let on = true
+    fetchPersonDetail(selectedId)
+      .then(d => { if (on) setDetail(d) })
+      .catch(() => { if (on) setDetail(null) })
+    return () => { on = false }
+  }, [selectedId])
+
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
   })
@@ -715,50 +1060,7 @@ export function Home() {
         overflowX: 'hidden',
       }}
     >
-      {/* Navbar */}
-      <header
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          height: 58,
-          background: 'rgba(255,255,255,0.78)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          borderBottom: '1px solid rgba(242,195,133,0.35)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 20px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <AgentDot size={22} pulse />
-          <span style={{ fontSize: 16, fontWeight: 600, color: '#1A1A1A', letterSpacing: '-0.01em' }}>
-            Sendero
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <button
-            onClick={() => {
-              localStorage.removeItem('onboarding_complete')
-              navigate('/login')
-            }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: '#6B6B6B', fontSize: 13, fontFamily: 'var(--font-family)' }}
-          >
-            <LogOut size={16} />
-            Cerrar sesión
-          </button>
-          <button
-            onClick={() => navigate('/profile')}
-            aria-label="Ir al perfil"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
-          >
-            <UserCircle size={28} color="#F2921D" />
-          </button>
-        </div>
-      </header>
+      <AppHeader />
 
       {/* Main content */}
       <main style={{ flex: 1, padding: '16px 16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -810,19 +1112,24 @@ export function Home() {
           </GlassCard>
 
           {/* Mapa */}
-          <div style={{ flex: 1, position: 'relative', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(242,195,133,0.35)' }}>
+          <div style={{ flex: 1, position: 'relative', borderRadius: 16, overflow: 'hidden', border: '1px solid var(--glass-border-strong)' }}>
             {isLoaded ? (
               <Map
                 staticMarkers={STATIC_MARKERS}
-                persons={persons}
+                persons={backgroundPersons}
                 showPersons={filters.desaparicion}
                 filters={filters}
+                selectedCoords={selectedCoords}
+                theme={theme}
               />
             ) : (
-              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9f5ed' }}>
-                <span style={{ color: '#6B6B6B', fontSize: 13 }}>Cargando mapa…</span>
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)' }}>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>Cargando mapa…</span>
               </div>
             )}
+
+            {/* Panel de la persona seleccionada (lado derecho del mapa) */}
+            <PersonDetailPanel person={panelPerson} detail={detail} />
 
             {/* Leyenda */}
             <div style={{
@@ -994,11 +1301,17 @@ export function Home() {
                 background: 'rgba(242,195,133,0.07)',
                 borderTop: '1px solid rgba(242,195,133,0.18)',
               }}>
-                <span style={{ fontSize: 11, color: '#6B6B6B' }}>Última actualización: hace 14 minutos</span>
+                 <span style={{ fontSize: 11, color: '#6B6B6B' }}>Última actualización: hace 14 minutos</span>
               </div>
             </GlassCard>
           </div>
         </div>
+
+        {/* Firecrawl news analysis for the selected person */}
+        <NewsAnalysisWidget
+          id_victimadirecta={vinculo?.persona?.id_victimadirecta ?? readStoredPersona()?.id_victimadirecta ?? null}
+          personName={panelPerson ? fullName(panelPerson) : ''}
+        />
       </main>
 
       {/* Botón flotante Subir evidencia */}

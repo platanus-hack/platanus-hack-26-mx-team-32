@@ -2,6 +2,7 @@ import { supabase } from '../../lib/supabase'
 
 export interface PersonOnMap {
   id: number
+  id_victimadirecta: string | null
   nombre: string | null
   primer_apellido: string | null
   segundo_apellido: string | null
@@ -17,6 +18,7 @@ export interface PersonOnMap {
 
 const COLUMNS = [
   'id',
+  'id_victimadirecta',
   'nombre',
   'primer_apellido',
   'segundo_apellido',
@@ -41,6 +43,7 @@ export async function fetchPersonsOnMap(): Promise<PersonOnMap[]> {
   const rows = ((data || []) as unknown) as Array<Record<string, unknown>>
   return rows.map(row => ({
     id: row.id as number,
+    id_victimadirecta: (row.id_victimadirecta as string) ?? null,
     nombre: row.nombre as string | null,
     primer_apellido: row.primer_apellido as string | null,
     segundo_apellido: row.segundo_apellido as string | null,
