@@ -121,5 +121,9 @@ hilo/
 #START BACKEND
   uv run uvicorn src.main:app --reload --port 8000
 
+    Option B — activate the venv yourself (now that uv sync created it):
+  source .venv/bin/activate
+  uvicorn src.main:app --reload --port 8000
+
 #START FRONTEND
     bun run dev
