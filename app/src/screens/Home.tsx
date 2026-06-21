@@ -8,6 +8,8 @@ import { ChatDrawer } from '../components/ChatDrawer'
 import { getMyVinculo } from '../features/profile/api'
 import { fullName, type VinculoOut } from '../features/profile/types'
 import { fetchPersonsOnMap, type PersonOnMap } from '../features/landing/api'
+import { matchPreview } from '../features/matching/api'
+import type { PreviewCandidate } from '../features/matching/types'
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
@@ -368,9 +370,71 @@ function EvidenceModal({ onClose }: { onClose: () => void }) {
 
 // ── Modal Subir Evidencia ─────────────────────────────────────────────────────
 
+const MX_ESTADOS = [
+  'AGUASCALIENTES', 'BAJA CALIFORNIA', 'BAJA CALIFORNIA SUR', 'CAMPECHE', 'CHIAPAS', 'CHIHUAHUA',
+  'CIUDAD DE MEXICO', 'COAHUILA', 'COLIMA', 'DURANGO', 'GUANAJUATO', 'GUERRERO', 'HIDALGO',
+  'JALISCO', 'MEXICO', 'MICHOACAN', 'MORELOS', 'NAYARIT', 'NUEVO LEON', 'OAXACA', 'PUEBLA',
+  'QUERETARO', 'QUINTANA ROO', 'SAN LUIS POTOSI', 'SINALOA', 'SONORA', 'TABASCO', 'TAMAULIPAS',
+  'TLAXCALA', 'VERACRUZ', 'YUCATAN', 'ZACATECAS',
+]
+
+const evLabel: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B', marginBottom: 6 }
+
+// Remove the native select chevron and draw a clean custom one (glass-input is built for text inputs).
+const evSelect: React.CSSProperties = {
+  appearance: 'none',
+  WebkitAppearance: 'none',
+  MozAppearance: 'none',
+  backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%236B6B6B' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 14px center',
+  paddingRight: 34,
+}
+
 function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
   const [desc, setDesc] = useState('')
   const [fileName, setFileName] = useState<string | null>(null)
+  const [sexo, setSexo] = useState('')
+  const [estado, setEstado] = useState('')
+  const [edadMin, setEdadMin] = useState('')
+  const [edadMax, setEdadMax] = useState('')
+  const [estatura, setEstatura] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [results, setResults] = useState<PreviewCandidate[] | null>(null)
+
+  const hasInput = !!(desc.trim() || sexo || estado || edadMin || edadMax || estatura)
+  const edadInvalid = !!(edadMin && edadMax && Number(edadMin) > Number(edadMax))
+
+  // Build a structured CuerpoQuery from the form and run the matcher
+  // (embed → retrieve → score → verify → ranked personas). All fields optional.
+  async function run() {
+    if (!hasInput) return
+    if (edadInvalid) {
+      setError('La edad mínima no puede ser mayor que la máxima')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setResults(null)
+    try {
+      const res = await matchPreview({
+        sexo: sexo || undefined,
+        estado: estado || undefined,
+        edad_min: edadMin ? Number(edadMin) : undefined,
+        edad_max: edadMax ? Number(edadMax) : undefined,
+        estatura_cm: estatura ? Number(estatura) : undefined,
+        senas: desc.trim() ? [desc.trim()] : undefined,
+      })
+      setResults(res.candidatos)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo procesar la evidencia')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const TIER_COLOR: Record<string, string> = { alta: '#2F855A', media: '#B7791F', baja: '#9C9C9C' }
 
   return (
     <div
@@ -392,6 +456,42 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Datos del hallazgo (estructurados, opcionales) */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <label style={evLabel}>Sexo</label>
+              <select className="glass-input" style={evSelect} value={sexo} onChange={e => setSexo(e.target.value)}>
+                <option value="">Cualquiera</option>
+                <option value="HOMBRE">Hombre</option>
+                <option value="MUJER">Mujer</option>
+              </select>
+            </div>
+            <div>
+              <label style={evLabel}>Estado</label>
+              <select className="glass-input" style={evSelect} value={estado} onChange={e => setEstado(e.target.value)}>
+                <option value="">Cualquiera</option>
+                {MX_ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={evLabel}>Edad mín.</label>
+              <input className="glass-input" type="text" inputMode="numeric" maxLength={3} value={edadMin} onChange={e => setEdadMin(e.target.value.replace(/\D/g, ''))} placeholder="—" />
+            </div>
+            <div>
+              <label style={evLabel}>Edad máx.</label>
+              <input className="glass-input" type="text" inputMode="numeric" maxLength={3} value={edadMax} onChange={e => setEdadMax(e.target.value.replace(/\D/g, ''))} placeholder="—" />
+            </div>
+            <div>
+              <label style={evLabel}>Estatura (cm)</label>
+              <input className="glass-input" type="text" inputMode="numeric" maxLength={3} value={estatura} onChange={e => setEstatura(e.target.value.replace(/\D/g, ''))} placeholder="—" />
+            </div>
+            {edadInvalid && (
+              <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: '#c0392b' }}>
+                ⚠ La edad mínima no puede ser mayor que la máxima.
+              </p>
+            )}
+          </div>
+
           {/* Foto */}
           <div>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B', marginBottom: 8 }}>
@@ -425,23 +525,56 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
             </label>
           </div>
 
-          {/* Descripción */}
+          {/* Señas / descripción */}
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B', marginBottom: 8 }}>
-              Descripción del hallazgo
-            </label>
+            <label style={evLabel}>Señas particulares y descripción</label>
             <textarea
               value={desc}
               onChange={e => setDesc(e.target.value)}
               className="glass-input"
-              placeholder="Describe qué encontraste, dónde y cuándo…"
-              style={{ minHeight: 120, resize: 'vertical', lineHeight: 1.6, fontSize: 13 }}
+              placeholder="Tatuajes, cicatrices, ropa, complexión, dónde y cuándo…"
+              style={{ minHeight: 110, resize: 'vertical', lineHeight: 1.6, fontSize: 13 }}
             />
           </div>
 
-          <button className="btn-primary" style={{ width: '100%', padding: '12px', fontSize: 14 }} onClick={onClose}>
-            Enviar evidencia
+          {error && <p style={{ fontSize: 13, color: '#c0392b', margin: 0 }}>⚠ {error}</p>}
+
+          <button
+            className="btn-primary"
+            style={{ width: '100%', padding: '12px', fontSize: 14, opacity: loading || !hasInput || edadInvalid ? 0.6 : 1 }}
+            onClick={run}
+            disabled={loading || !hasInput || edadInvalid}
+          >
+            {loading ? 'Buscando coincidencias…' : 'Buscar coincidencias'}
           </button>
+
+          {results && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6B6B6B' }}>
+                {results.length > 0 ? `${results.length} posibles coincidencias` : 'Sin coincidencias por ahora'}
+              </div>
+              {results.map(c => (
+                <div key={c.persona_victima_id} style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(242,195,133,0.3)', borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: TIER_COLOR[c.tier] ?? '#6B6B6B', background: (TIER_COLOR[c.tier] ?? '#6B6B6B') + '20', border: `1px solid ${(TIER_COLOR[c.tier] ?? '#6B6B6B')}55`, padding: '2px 8px', borderRadius: 40 }}>{c.tier}</span>
+                    <strong style={{ fontSize: 14, color: '#1A1A1A' }}>{c.nombre ?? '—'}</strong>
+                    <span style={{ marginLeft: 'auto', fontSize: 12, color: '#6B6B6B', fontVariantNumeric: 'tabular-nums' }}>{(c.score * 100).toFixed(0)}%</span>
+                  </div>
+                  {c.evidencia.length > 0 && (
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 12, color: '#2F855A' }}>
+                      {c.evidencia.map((e, j) => <li key={j}>{e}</li>)}
+                    </ul>
+                  )}
+                  {c.contradicciones.length > 0 && (
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 12, color: '#c0392b' }}>
+                      {c.contradicciones.map((e, j) => <li key={j}>{e}</li>)}
+                    </ul>
+                  )}
+                  {c.razonamiento && <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B6B6B', fontStyle: 'italic' }}>{c.razonamiento}</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
