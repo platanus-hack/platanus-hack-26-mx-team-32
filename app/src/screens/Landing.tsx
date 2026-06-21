@@ -497,7 +497,7 @@ export function Landing() {
       markersRef.current = []
       clustererRef.current = null
     }
-  }, [isLoaded, mapReady, persons, iconBuckets, markerColor, handleSelect])
+  }, [isLoaded, mapReady, persons, iconBuckets, markerColor, handleSelect, minTs, maxTs])
 
   // Thick Mexico state borders, re-styled when the theme flips.
   useEffect(() => {

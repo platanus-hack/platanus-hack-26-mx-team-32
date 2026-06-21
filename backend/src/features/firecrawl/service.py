@@ -1,7 +1,11 @@
 import httpx
+import logging
 
 from src.config import settings
-from .schemas import FirecrawlSearchRequest
+from src.llm import chat_with_tool
+from .schemas import FirecrawlSearchRequest, NewsAnalysis, NewsRequest, NewsResponse, RelatedPerson
+
+logger = logging.getLogger("hilo.firecrawl")
 
 FIRECRAWL_URL = "https://api.firecrawl.dev/v2/search"
 
