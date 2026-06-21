@@ -25,27 +25,29 @@ def generate_candidates_node(state: ResearcherState) -> dict:
     if not settings.anthropic_api_key:
         return {"candidate_sources": [], "error": None}
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    prompt = (
-        f"List 3-5 official Mexican government or institutional sources "
-        f"(URLs) relevant to: {state['query']}\n\n"
-        "Respond with a JSON array only. Each element: "
-        '{"name": str, "url": str, "type": "fiscalia|semefo|comision|registro_oficial|colectivo"}'
-        "\nOnly include real, verifiable URLs."
-    )
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = msg.content[0].text
-    match = re.search(r"\[.*\]", text, re.DOTALL)
-    if not match:
-        return {"candidate_sources": [], "error": "no JSON array in LLM response"}
     try:
+        client = Anthropic(api_key=settings.anthropic_api_key)
+        prompt = (
+            f"List 3-5 official Mexican government or institutional sources "
+            f"(URLs) relevant to: {state['query']}\n\n"
+            "Respond with a JSON array only. Each element: "
+            '{"name": str, "url": str, "type": "fiscalia|semefo|comision|registro_oficial|colectivo"}'
+            "\nOnly include real, verifiable URLs."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if not match:
+            return {"candidate_sources": [], "error": "no JSON array in LLM response"}
         sources = json.loads(match.group())
         return {"candidate_sources": sources, "error": None}
     except json.JSONDecodeError as exc:
+        return {"candidate_sources": [], "error": str(exc)}
+    except Exception as exc:
         return {"candidate_sources": [], "error": str(exc)}
 
 
