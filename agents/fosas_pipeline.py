@@ -22,9 +22,11 @@ from langgraph.graph import END, StateGraph
 
 try:
     from .config import settings
+    from .data_cleaner import clean_event
     from .db import finish_task, get_supabase
 except ImportError:
     from config import settings
+    from data_cleaner import clean_event
     from db import finish_task, get_supabase
 
 
@@ -144,18 +146,20 @@ def extract_node(state: PipelineState) -> dict:
         events.append(event)
 
         try:
-            severity = 5 if event.get("event_type") in _HIGH_SEVERITY_TYPES else 2
+            cleaned_event = clean_event(event, "social_risk_events")
+            cleaned_event.pop("_cleaned", None)
+            severity = 5 if cleaned_event.get("event_type") in _HIGH_SEVERITY_TYPES else 2
             sb.table("social_risk_events").insert({
-                "event_type": event.get("event_type", "otro"),
-                "estado": event.get("estado"),
-                "municipio": event.get("municipio"),
-                "summary_public": event.get("summary"),
-                "confidence": event.get("confidence", 0.3),
+                "event_type": cleaned_event.get("event_type", "otro"),
+                "estado": cleaned_event.get("estado"),
+                "municipio": cleaned_event.get("municipio"),
+                "summary_public": cleaned_event.get("summary_public"),
+                "confidence": cleaned_event.get("confidence", 0.3),
                 "severity": severity,
-                "privacy_level": "restricted",
-                "review_status": "pending",
+                "privacy_level": cleaned_event.get("privacy_level", "restricted"),
+                "review_status": cleaned_event.get("review_status", "pending"),
                 "reported_at": now,
-                "evidence_json": json.dumps({"source_url": page["url"], "title": page["title"]}),
+                "evidence_json": cleaned_event.get("evidence_json") or json.dumps({"source_url": page["url"], "title": page["title"]}),
             }).execute()
             print(f"[extractor] saved '{event.get('event_type')}' (conf={event.get('confidence')}) — {page['url']}")
         except Exception as exc:

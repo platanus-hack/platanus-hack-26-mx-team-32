@@ -52,7 +52,7 @@ const SEED_MARKERS: MarkerData[] = [
 function pinIcon(color: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36"><path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 24 12 24s12-15 12-24C24 5.373 18.627 0 12 0z" fill="${color}" opacity="0.9"/><circle cx="12" cy="12" r="5" fill="white" opacity="0.9"/></svg>`
   return {
-    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
     scaledSize: new google.maps.Size(24, 36),
     anchor: new google.maps.Point(12, 36),
   }
@@ -60,6 +60,7 @@ function pinIcon(color: string) {
 
 function Map({ markers }: { markers: MarkerData[] }) {
   const [selected, setSelected] = useState<MarkerData | null>(null)
+  console.log('[Map component] rendering with', markers.length, 'markers')
 
   return (
     <GoogleMap
@@ -136,18 +137,35 @@ export function Home() {
   const fetchRiskEvents = useCallback(async () => {
     try {
       const res = await fetch(`${SERVER}/api/risk-events`)
+      console.log('[risk-events] status', res.status)
       if (!res.ok) return
       const data = await res.json()
-      const markers: MarkerData[] = (data.features ?? []).map((f: any, i: number) => ({
-        id: 90000 + i,
-        lat: f.geometry.coordinates[1],
-        lng: f.geometry.coordinates[0],
-        type: f.properties.layer as FilterKey,
-        name: [f.properties.municipio, f.properties.estado].filter(Boolean).join(', ') || 'México',
-        date: (f.properties.reported_at ?? '').slice(0, 10),
-      }))
+      console.log('[risk-events] features received:', data.features?.length)
+      // Count how many times each coordinate pair appears so we can jitter duplicates
+      const coordCount: Record<string, number> = {}
+      const markers: MarkerData[] = (data.features ?? []).map((f: any, i: number) => {
+        const baseLat = f.geometry.coordinates[1]
+        const baseLng = f.geometry.coordinates[0]
+        const key = `${baseLat},${baseLng}`
+        const idx = coordCount[key] ?? 0
+        coordCount[key] = idx + 1
+        // Spread duplicates in a small circle (~1-3 km radius)
+        const angle = (idx * 137.5 * Math.PI) / 180  // golden angle spacing
+        const radius = idx === 0 ? 0 : 0.015 + (Math.floor(idx / 8) * 0.01)
+        return {
+          id: 90000 + i,
+          lat: baseLat + Math.sin(angle) * radius,
+          lng: baseLng + Math.cos(angle) * radius,
+          type: f.properties.layer as FilterKey,
+          name: [f.properties.municipio, f.properties.estado].filter(Boolean).join(', ') || 'México',
+          date: (f.properties.reported_at ?? '').slice(0, 10),
+        }
+      })
+      console.log('[risk-events] markers set:', markers.length, markers.map(m => `${m.type}@(${m.lat},${m.lng})`).slice(0, 5))
       setRiskMarkers(markers)
-    } catch {}
+    } catch (e) {
+      console.error('[risk-events] fetch error', e)
+    }
   }, [])
 
   // Load on mount, poll every 30 s
@@ -167,9 +185,10 @@ export function Home() {
     setFilters(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
-  // Use real markers when available, fall back to seed markers
-  const baseMarkers = riskMarkers.length > 0 ? riskMarkers : SEED_MARKERS
-  const visibleMarkers = baseMarkers.filter(m => filters[m.type])
+  // Merge seed markers + real markers; seeds fill layers with no live data yet
+  const realLayers = new Set(riskMarkers.map(m => m.type))
+  const seedFallback = SEED_MARKERS.filter(m => !realLayers.has(m.type))
+  const visibleMarkers = [...seedFallback, ...riskMarkers].filter(m => filters[m.type])
 
   return (
     <div

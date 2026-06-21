@@ -3,6 +3,7 @@ config({ path: ".env.local" });
 import { chromium, type Browser } from "playwright";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { cleanFacebookPattern } from "./data-cleaner.js";
 
 const FACEBOOK_GROUP_URL =
   process.env.FACEBOOK_GROUP_URL ??
@@ -604,6 +605,7 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
         salary_mentioned: null,
         upfront_fee: null,
         contact_method: null,
+        is_fake_job: null,
       };
     }
   });
@@ -628,26 +630,31 @@ export async function scrapeAndSeedFacebookPatterns(): Promise<ScrapeSummary> {
 
   // Step 3: build rows
   const now = new Date().toISOString();
-  const rows = posts.map((post, i) => {
-    const extraction = extractions[i];
-    const geocode = extraction.location_text ? (geocodeCache.get(extraction.location_text) ?? null) : null;
-    return {
-      id: randomUUID(),
-      post_url: post.url,
-      post_content: post.content,
-      tone_description: extraction.tone_description,
-      tone_keywords: extraction.tone_keywords,
-      image_urls: [] as string[],
-      image_descriptions: extraction.image_descriptions,
-      location_text: extraction.location_text,
-      location_latitude: geocode?.lat ?? null,
-      location_longitude: geocode?.lng ?? null,
-      location_region: geocode?.region ?? null,
-      is_fake_job: extraction.is_fake_job ?? null,
-      scraped_at: now,
-      post_date: parseRelativeDate(post.content),
-    };
-  });
+  const rows = await Promise.all(
+    posts.map(async (post, i) => {
+      const extraction = extractions[i];
+      const geocode = extraction.location_text ? (geocodeCache.get(extraction.location_text) ?? null) : null;
+      const rawRow = {
+        id: randomUUID(),
+        post_url: post.url,
+        post_content: post.content,
+        tone_description: extraction.tone_description,
+        tone_keywords: extraction.tone_keywords,
+        image_urls: [] as string[],
+        image_descriptions: extraction.image_descriptions,
+        location_text: extraction.location_text,
+        location_latitude: geocode?.lat ?? null,
+        location_longitude: geocode?.lng ?? null,
+        location_region: geocode?.region ?? null,
+        is_fake_job: extraction.is_fake_job ?? null,
+        scraped_at: now,
+        post_date: parseRelativeDate(post.content),
+      };
+      const cleaned = await cleanFacebookPattern(rawRow);
+      cleaned._cleaned = undefined; // Strip before upsert
+      return cleaned;
+    })
+  );
 
   // Step 4: batch upsert (Supabase handles up to 500 rows per call)
   console.log(`\nUpserting ${rows.length} rows in batch...`);
@@ -788,28 +795,33 @@ export async function scrapeAndSeedFakeJobPatterns(): Promise<ScrapeSummary> {
   );
 
   const now = new Date().toISOString();
-  const rows = posts.map((post, i) => {
-    const extraction = extractions[i];
-    const geocode = extraction.location_text
-      ? (geocodeCache.get(extraction.location_text) ?? null)
-      : null;
-    return {
-      id: randomUUID(),
-      post_url: post.url,
-      post_content: post.content,
-      tone_description: buildJobToneDescription(extraction),
-      tone_keywords: extraction.tone_keywords,
-      image_urls: [] as string[],
-      image_descriptions: extraction.image_descriptions,
-      location_text: extraction.location_text,
-      location_latitude: geocode?.lat ?? null,
-      location_longitude: geocode?.lng ?? null,
-      location_region: geocode?.region ?? null,
-      is_fake_job: extraction.is_fake_job ?? null,
-      scraped_at: now,
-      post_date: parseRelativeDate(post.content),
-    };
-  });
+  const rows = await Promise.all(
+    posts.map(async (post, i) => {
+      const extraction = extractions[i];
+      const geocode = extraction.location_text
+        ? (geocodeCache.get(extraction.location_text) ?? null)
+        : null;
+      const rawRow = {
+        id: randomUUID(),
+        post_url: post.url,
+        post_content: post.content,
+        tone_description: buildJobToneDescription(extraction),
+        tone_keywords: extraction.tone_keywords,
+        image_urls: [] as string[],
+        image_descriptions: extraction.image_descriptions,
+        location_text: extraction.location_text,
+        location_latitude: geocode?.lat ?? null,
+        location_longitude: geocode?.lng ?? null,
+        location_region: geocode?.region ?? null,
+        is_fake_job: extraction.is_fake_job ?? null,
+        scraped_at: now,
+        post_date: parseRelativeDate(post.content),
+      };
+      const cleaned = await cleanFacebookPattern(rawRow);
+      cleaned._cleaned = undefined; // Strip before upsert
+      return cleaned;
+    })
+  );
 
   console.log(`\nUpserting ${rows.length} rows in batch...`);
   const BATCH = 200;
