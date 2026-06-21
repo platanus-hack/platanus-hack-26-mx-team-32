@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, User, Shield, Bell } from 'lucide-react'
+import { Search, User, Shield, Bell, Loader2, Database } from 'lucide-react'
 import { GlassCard } from '../components/GlassCard'
 import { AgentDot } from '../components/AgentDot'
-import { createVinculo, searchPersonas } from '../features/profile/api'
+import { createVinculo, listPersonas, searchPersonas } from '../features/profile/api'
 import { fullName, type PersonaSummary } from '../features/profile/types'
 import { useTheme } from '../features/theme'
 import { API_URL } from '../lib/http'
+
+const PAGE_SIZE = 20
 
 function personaMeta(p: PersonaSummary): string {
   return [p.sexo, p.edad_actual && `${p.edad_actual} años`, p.estado]
@@ -33,6 +35,75 @@ function StepDots({ current, total }: { current: number; total: number }) {
   )
 }
 
+function PersonaRow({
+  person,
+  hoverBg,
+  onSelect,
+}: {
+  person: PersonaSummary
+  hoverBg: string
+  onSelect: (p: PersonaSummary) => void
+}) {
+  return (
+    <button
+      onClick={() => onSelect(person)}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 14px',
+        border: 'none',
+        background: 'transparent',
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'background 0.15s',
+        fontFamily: 'var(--font-family)',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = hoverBg)}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)' }}>{fullName(person)}</div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{personaMeta(person) || 'Persona desaparecida'}</div>
+      </div>
+      {person.id_victimadirecta ? (
+        <img
+          src={`${API_URL}/personas/${person.id_victimadirecta}/foto?size=96`}
+          alt=""
+          loading="lazy"
+          onError={(e) => {
+            e.currentTarget.style.visibility = 'hidden'
+          }}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 8,
+            objectFit: 'cover',
+            background: 'var(--color-photo-bg)',
+            flexShrink: 0,
+            border: '1px solid var(--surface-card-border)',
+          }}
+        />
+      ) : (
+        <div style={{
+          width: 40,
+          height: 40,
+          borderRadius: 8,
+          background: 'var(--color-photo-bg)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          border: '1px solid var(--surface-card-border)',
+        }}>
+          <User size={18} color="var(--color-text-secondary)" />
+        </div>
+      )}
+    </button>
+  )
+}
+
 function Step1({
   onNext,
   selected,
@@ -44,37 +115,78 @@ function Step1({
 }) {
   const { theme } = useTheme()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<PersonaSummary[]>([])
-  const [loading, setLoading] = useState(false)
+  const [searchResults, setSearchResults] = useState<PersonaSummary[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+
+  // Browse mode: paginated list of the full table. Shows on mount so the user
+  // gets a feel for the size of the database.
+  const [browseItems, setBrowseItems] = useState<PersonaSummary[]>([])
+  const [browseOffset, setBrowseOffset] = useState(0)
+  const [browseTotal, setBrowseTotal] = useState(0)
+  const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseLoadingMore, setBrowseLoadingMore] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
-  // Debounced real search against the RNPDNO dataset (matches name + apellidos).
+  const isSearching = query.trim().length >= 2
+
+  // Initial browse: first page when the input gains focus (so we don't fetch
+  // until the user is actually going to interact with the dropdown).
+  async function loadFirstPage() {
+    if (browseItems.length > 0 || browseLoading) return
+    setBrowseLoading(true)
+    try {
+      const res = await listPersonas(PAGE_SIZE, 0)
+      setBrowseItems(res.items)
+      setBrowseTotal(res.total)
+      setBrowseOffset(res.items.length)
+    } catch {
+      // Soft-fail: leave the dropdown empty rather than blocking the user.
+    } finally {
+      setBrowseLoading(false)
+    }
+  }
+
+  async function loadMore() {
+    if (browseLoadingMore || browseOffset >= browseTotal) return
+    setBrowseLoadingMore(true)
+    try {
+      const res = await listPersonas(PAGE_SIZE, browseOffset)
+      setBrowseItems(prev => [...prev, ...res.items])
+      setBrowseOffset(prev => prev + res.items.length)
+    } catch {
+      // ignore
+    } finally {
+      setBrowseLoadingMore(false)
+    }
+  }
+
+  // Debounced real search against the RNPDNO dataset.
   useEffect(() => {
-    const term = query.trim()
-    if (selected || term.length < 2) {
+    if (selected) return
+    if (!isSearching) {
       void Promise.resolve().then(() => {
-        setResults([])
-        setLoading(false)
+        setSearchResults([])
+        setSearchLoading(false)
       })
       return
     }
     let active = true
-    void Promise.resolve().then(() => setLoading(true))
+    void Promise.resolve().then(() => setSearchLoading(true))
     const t = setTimeout(async () => {
       try {
-        const res = await searchPersonas(term)
-        if (active) setResults(res.items)
+        const res = await searchPersonas(query.trim())
+        if (active) setSearchResults(res.items)
       } catch {
-        if (active) setResults([])
+        if (active) setSearchResults([])
       } finally {
-        if (active) setLoading(false)
+        if (active) setSearchLoading(false)
       }
     }, 250)
     return () => {
       active = false
       clearTimeout(t)
     }
-  }, [query, selected])
+  }, [query, selected, isSearching])
 
   function handleSelect(person: PersonaSummary) {
     onSelect(person)
@@ -83,6 +195,12 @@ function Step1({
   }
 
   const hoverBg = theme === 'dark' ? 'rgba(242,146,29,0.10)' : 'rgba(242,146,29,0.06)'
+
+  // What the dropdown should show right now.
+  const showBrowse = !isSearching
+  const visibleItems = showBrowse ? browseItems : searchResults
+  const isLoading = showBrowse ? browseLoading : searchLoading
+  const canLoadMore = showBrowse && !browseLoadingMore && browseOffset < browseTotal
 
   return (
     <div className="anim-fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
@@ -109,16 +227,16 @@ function Step1({
             className="glass-input"
             value={query}
             onChange={e => { setQuery(e.target.value); onSelect(null); setDropdownOpen(true) }}
-            onFocus={() => setDropdownOpen(true)}
+            onFocus={() => { setDropdownOpen(true); void loadFirstPage() }}
             onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
             onKeyDown={e => { if (e.key === 'Escape') setDropdownOpen(false) }}
-            placeholder="Escribe el nombre..."
+            placeholder="Busca por nombre o apellido..."
             autoComplete="off"
           />
           <Search size={16} style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-secondary)', pointerEvents: 'none' }} />
         </div>
 
-        {dropdownOpen && !selected && (loading || results.length > 0) && (
+        {dropdownOpen && !selected && (
           <div
             style={{
               position: 'absolute',
@@ -135,68 +253,89 @@ function Step1({
               boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
             }}
           >
-            {loading && results.length === 0 && (
-              <div style={{ padding: '12px 14px', fontSize: 13, color: 'var(--color-text-secondary)' }}>Buscando…</div>
+            {/* Header: shows whether we're browsing the full DB or filtering. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '8px 14px',
+                borderBottom: '1px solid var(--surface-card-border)',
+                background: showBrowse ? 'rgba(242,146,29,0.06)' : 'transparent',
+                position: 'sticky',
+                top: 0,
+                zIndex: 1,
+              }}
+            >
+              {showBrowse ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    <Database size={12} color="var(--color-primary)" />
+                    <span>Base de datos</span>
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                    {browseTotal > 0 ? `${browseItems.length.toLocaleString('es-MX')} / ${browseTotal.toLocaleString('es-MX')}` : 'Cargando…'}
+                  </span>
+                </>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  {searchLoading ? 'Buscando…' : `${searchResults.length.toLocaleString('es-MX')} resultado${searchResults.length === 1 ? '' : 's'}`}
+                </span>
+              )}
+            </div>
+
+            {isLoading && visibleItems.length === 0 && (
+              <div style={{ padding: '20px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                <Loader2 size={14} className="anim-breath" color="var(--color-primary)" />
+                <span>{showBrowse ? 'Cargando base de datos…' : 'Buscando…'}</span>
+              </div>
             )}
-            {results.map(person => (
+
+            {!isLoading && visibleItems.length === 0 && (
+              <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: 12 }}>
+                {showBrowse
+                  ? 'Aún no hay fichas disponibles.'
+                  : `Sin resultados para “${query.trim()}”.`}
+              </div>
+            )}
+
+            {visibleItems.map(person => (
+              <PersonaRow key={person.id} person={person} hoverBg={hoverBg} onSelect={handleSelect} />
+            ))}
+
+            {showBrowse && canLoadMore && (
               <button
-                key={person.id}
-                onClick={() => handleSelect(person)}
+                onMouseDown={e => e.preventDefault() /* don't blur the input */}
+                onClick={() => void loadMore()}
+                disabled={browseLoadingMore}
                 style={{
                   width: '100%',
+                  padding: '10px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderTop: '1px solid var(--surface-card-border)',
+                  color: 'var(--color-primary)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: browseLoadingMore ? 'wait' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 12,
-                  padding: '10px 14px',
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background 0.15s',
+                  justifyContent: 'center',
+                  gap: 6,
                   fontFamily: 'var(--font-family)',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = hoverBg)}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)' }}>{fullName(person)}</div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{personaMeta(person) || 'Persona desaparecida'}</div>
-                </div>
-                {person.id_victimadirecta ? (
-                  <img
-                    src={`${API_URL}/personas/${person.id_victimadirecta}/foto?size=96`}
-                    alt=""
-                    loading="lazy"
-                    onError={(e) => {
-                      e.currentTarget.style.visibility = 'hidden'
-                    }}
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 8,
-                      objectFit: 'cover',
-                      background: 'var(--color-photo-bg)',
-                      flexShrink: 0,
-                      border: '1px solid var(--surface-card-border)',
-                    }}
-                  />
+                {browseLoadingMore ? (
+                  <>
+                    <Loader2 size={12} className="anim-breath" />
+                    <span>Cargando…</span>
+                  </>
                 ) : (
-                  <div style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 8,
-                    background: 'var(--color-photo-bg)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    border: '1px solid var(--surface-card-border)',
-                  }}>
-                    <User size={18} color="var(--color-text-secondary)" />
-                  </div>
+                  <span>Ver más ({browseTotal - browseOffset} restantes)</span>
                 )}
               </button>
-            ))}
+            )}
           </div>
         )}
       </div>

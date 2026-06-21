@@ -244,6 +244,7 @@ function Map({ staticMarkers, persons, showPersons, filters, selectedCoords, the
         rotateControl: false,
         scaleControl: false,
         panControl: false,
+        gestureHandling: 'greedy',
       }}
       onClick={() => setSelectedStatic(null)}
     >
@@ -1345,7 +1346,7 @@ export function Home() {
                 ) : (
                   <>
                     <p style={{ fontSize: 14, color: 'var(--color-text-primary)', lineHeight: 1.70, marginBottom: 18, textWrap: 'pretty' as const }}>
-                      Con base en los 12 reportes cruzados esta semana, la zona noreste del estado de Michoacán — particularmente los municipios de Zamora y Jacona — muestra la mayor concentración de coincidencias. Se han identificado 3 posibles fosas en un radio de 8 km y 2 puntos de desaparición reportados en los últimos 30 días con características similares al perfil registrado.
+                      Michelle Itzayana Fuentes Calderón, de 15 años, fue reportada como desaparecida en Yautepec, Morelos, el 24 de mayo de 2026. El perfil describe a una adolescente de complexión robusta, 1.50 m de estatura y 60 kg, con cabello castaño claro corto y liso, ojos negros pequeños, nariz recta, boca pequeña y labios medianos. Al momento de su desaparición vestía pantalón azul, sudadera azul y tenis negro con blanco. Hasta el momento no se han identificado fosas cercanas, puntos de desaparición ni puntos de encuentro falsos que coincidan con su media filiación. La zona oriente de Morelos — particularmente los municipios cercanos a Yautepec como Cuautla, Emiliano Zapata y Jiutepec — se mantiene bajo monitoreo activo, y cualquier pista nueva será contrastada de inmediato con el perfil registrado.
                     </p>
 
                     <div>

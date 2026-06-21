@@ -691,6 +691,7 @@ export function Landing() {
             rotateControl: false,
             scaleControl: false,
             panControl: false,
+            gestureHandling: 'greedy',
           }}
         >
           {hovered && !selected && (
