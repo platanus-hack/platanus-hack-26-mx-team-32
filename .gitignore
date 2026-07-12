@@ -12,3 +12,5 @@ docs/*
 !docs/specs/
 !docs/specs/**
 graphify-out/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
